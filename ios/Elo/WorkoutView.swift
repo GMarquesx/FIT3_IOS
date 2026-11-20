@@ -239,7 +239,13 @@ struct WorkoutView: View {
                 .disabled(tracker.state == .idle)
                 .opacity(tracker.state == .idle ? 0.5 : 1)
             Button(tracker.state == .idle ? L("Start") : L("Finish")) {
-                if tracker.state == .idle { tracker.start() } else { tracker.finish() }
+                if tracker.state == .idle {
+                    tracker.start()
+                    band.holdHeartRate(true)
+                } else {
+                    tracker.finish()
+                    band.holdHeartRate(false)
+                }
             }
             .buttonStyle(EloButtonStyle(filled: true, height: 52))
         }

@@ -1,5 +1,6 @@
 import CoreBluetooth
 import Foundation
+import UIKit
 
 /// Um frame que passou pelo canal SAP (para a tela Console).
 struct ConsoleFrame: Identifiable, Codable {
@@ -58,6 +59,9 @@ final class Fit3Client: NSObject, ObservableObject {
     @Published var capture: [ConsoleFrame] = []
     @Published var history: [SentNotification] = []
     @Published var liveAlert: LiveAlert?
+    @Published var measuringHR = false
+    @Published var lastBpm: Int?
+    @Published var lastBpmDate: Date?
     @Published var probeRunning = false
     @Published var probeIndex = 0
     @Published var probeTotal = 0
@@ -89,6 +93,16 @@ final class Fit3Client: NSObject, ObservableObject {
     private var rssiTimer: Timer?
     private var probeItems: [DispatchWorkItem] = []
     private var lastBuzz: Date = .distantPast
+    private var lastHRMeasure: Date = .distantPast
+    private var hrStopWork: DispatchWorkItem?
+    private var hrHolds = 0
+    private var inForeground = true
+
+    /// Intervalo da medicao automatica de batimentos, em minutos (0 = so quando pedir).
+    var hrInterval: Int {
+        get { UserDefaults.standard.object(forKey: "hrInterval") as? Int ?? 30 }
+        set { UserDefaults.standard.set(newValue, forKey: "hrInterval"); objectWillChange.send() }
+    }
 
     /// Vibra rapidinho quando chega uma notificacao (a pulseira nao vibra sozinha com o 07/80).
     var vibrateOnArrival: Bool {
@@ -137,6 +151,60 @@ final class Fit3Client: NSObject, ObservableObject {
         }
         central = CBCentralManager(delegate: self, queue: .main,
                                    options: [CBCentralManagerOptionRestoreIdentifierKey: "elo.central"])
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.inForeground = false
+            self?.rssiTimer?.invalidate()
+            self?.rssiTimer = nil
+        }
+        nc.addObserver(forName: UIApplication.willEnterForegroundNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.inForeground = true
+            if self?.sessionReady == true { self?.startRSSI() }
+        }
+    }
+
+    // MARK: - Batimentos sob demanda (economiza bateria da pulseira e do iPhone)
+
+    /// Liga o 2A37 por alguns segundos e desliga sozinho.
+    func measureHeartRate(seconds: Double = 30) {
+        guard sessionReady, let hr = hrMeas, let p = peripheral else { return }
+        lastHRMeasure = Date()
+        measuringHR = true
+        p.setNotifyValue(true, for: hr)
+        hrStopWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.stopHeartRate() }
+        hrStopWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+        log("heart rate: measuring for \(Int(seconds)) s")
+    }
+
+    /// Mantem o batimento ao vivo enquanto alguem precisar (ex.: corrida).
+    func holdHeartRate(_ on: Bool) {
+        hrHolds = max(0, hrHolds + (on ? 1 : -1))
+        if hrHolds > 0 {
+            hrStopWork?.cancel()
+            guard sessionReady, let hr = hrMeas, let p = peripheral else { return }
+            measuringHR = true
+            p.setNotifyValue(true, for: hr)
+        } else {
+            stopHeartRate()
+        }
+    }
+
+    private func stopHeartRate() {
+        guard hrHolds == 0 else { return }
+        if let hr = hrMeas, let p = peripheral, p.state == .connected {
+            p.setNotifyValue(false, for: hr)
+        }
+        measuringHR = false
+        hrContact = false
+    }
+
+    private func maybePeriodicHeartRate() {
+        guard hrInterval > 0, !measuringHR, sessionReady else { return }
+        if Date().timeIntervalSince(lastHRMeasure) >= Double(hrInterval * 60) {
+            measureHeartRate(seconds: 30)
+        }
     }
 
     // MARK: - Acoes
@@ -373,8 +441,11 @@ final class Fit3Client: NSObject, ObservableObject {
             self.connecting = false
             self.status = L("Ready")
             self.lastContact = Date()
-            if let hr = self.hrMeas, let p = self.peripheral {
-                p.setNotifyValue(true, for: hr)
+            if self.hrHolds > 0 {
+                self.holdHeartRate(true)
+                self.hrHolds -= 1
+            } else {
+                self.measureHeartRate(seconds: 20)
             }
             if let p = self.peripheral {
                 self.mtu = p.maximumWriteValueLength(for: .withoutResponse) + 3
@@ -385,6 +456,7 @@ final class Fit3Client: NSObject, ObservableObject {
 
     private func startRSSI() {
         rssiTimer?.invalidate()
+        guard inForeground else { return }
         peripheral?.readRSSI()
         rssiTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.peripheral?.readRSSI()
@@ -400,6 +472,7 @@ final class Fit3Client: NSObject, ObservableObject {
 
     private func handleRX(_ value: Data) {
         lastContact = Date()
+        maybePeriodicHeartRate()
         switch FrameCodec.parse(value) {
         case .handshake:
             log("RX SAP handshake (\(value.count) B)")
@@ -460,6 +533,9 @@ final class Fit3Client: NSObject, ObservableObject {
 
     private func resetLink() {
         if probeRunning { stopProbe() }
+        hrStopWork?.cancel()
+        measuringHR = false
+        hrContact = false
         connected = false
         sessionReady = false
         writing = false
@@ -574,9 +650,6 @@ extension Fit3Client: CBPeripheralDelegate {
                 sapWrite = ch
             } else if ch.uuid == Fit3Client.hrMeasUUID {
                 hrMeas = ch
-                if sessionReady {
-                    peripheral.setNotifyValue(true, for: ch)
-                }
             }
         }
     }
@@ -591,7 +664,7 @@ extension Fit3Client: CBPeripheralDelegate {
             log("SAP notify active (paired)")
             startSession()
         } else if characteristic.uuid == Fit3Client.hrMeasUUID {
-            log("heart rate: subscribed to 2A37")
+            log(characteristic.isNotifying ? "heart rate: on" : "heart rate: off")
         }
     }
 
@@ -616,6 +689,8 @@ extension Fit3Client: CBPeripheralDelegate {
                 bpm = hr.bpm
                 hrContact = hr.contact
                 if hr.contact && hr.bpm > 0 {
+                    lastBpm = hr.bpm
+                    lastBpmDate = Date()
                     bpmSamples.append(hr.bpm)
                     if bpmSamples.count > 120 { bpmSamples.removeFirst(bpmSamples.count - 120) }
                     restingBpm = min(restingBpm ?? hr.bpm, hr.bpm)

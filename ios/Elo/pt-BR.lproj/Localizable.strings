@@ -251,3 +251,9 @@
 "A short buzz when an alert arrives" = "Uma vibração curta quando chega um aviso";
 "Wait between buzzes" = "Intervalo entre vibrações";
 "None" = "Nenhum";
+"Measuring… keep the band on" = "Medindo… mantenha a pulseira no pulso";
+"Tap to measure · %@" = "Toque para medir · %@";
+"Tap to measure" = "Toque para medir";
+"Measure heart rate" = "Medir batimentos";
+"On tap" = "Ao tocar";
+"Each reading keeps the sensor on for 30 s. Live during workouts." = "Cada leitura liga o sensor por 30 s. Ao vivo durante os treinos.";

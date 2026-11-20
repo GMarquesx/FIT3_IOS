@@ -44,6 +44,17 @@ struct HealthView: View {
                 SectionTitle(text: L("When to sync"))
                     .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
                 simpleRow(Text(L("Whenever the band connects")), $onConnect)
+                VStack(alignment: .leading, spacing: 8) {
+                    Rectangle().fill(EloColor.border).frame(height: 1)
+                    Text(L("Measure heart rate")).font(EloFont.inter(15, .medium)).foregroundColor(EloColor.text)
+                        .padding(.horizontal, 16)
+                    Segmented(options: [("0", L("On tap")), ("15", "15 min"), ("30", "30 min"), ("60", "1 h")],
+                              selection: Binding(get: { "\(band.hrInterval)" }, set: { band.hrInterval = Int($0) ?? 30 }))
+                        .padding(.horizontal, 16)
+                    Text(L("Each reading keeps the sensor on for 30 s. Live during workouts."))
+                        .font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
+                        .padding(.horizontal, 16).padding(.bottom, 8)
+                }
                 simpleRow(Text(L("In the background")) + Text(" " + L("(iOS decides when)"))
                     .font(EloFont.inter(12)).foregroundColor(EloColor.secondary), $background, last: true)
             }

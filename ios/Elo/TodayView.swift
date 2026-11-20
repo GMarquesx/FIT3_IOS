@@ -177,7 +177,7 @@ struct TodayView: View {
     private func cardBody(now: Date) -> some View {
         let phase = currentPhase(now)
         let m = motion(for: phase)
-        let bpmText = band.hrContact ? band.bpm.map { "\($0)" } ?? "—" : "—"
+        let bpmText = band.lastBpm.map { "\($0)" } ?? "—"
 
         return GeometryReader { geo in
             ZStack(alignment: .topLeading) {
@@ -270,21 +270,37 @@ struct TodayView: View {
         }
     }
 
+    private var heartDetail: String {
+        if band.measuringHR { return L("Measuring… keep the band on") }
+        if band.lastBpmDate != nil { return L("Tap to measure · %@", EloFormat.relative(band.lastBpmDate)) }
+        return L("Tap to measure")
+    }
+
     private var heartCard: some View {
-        let live = band.hrContact && (band.bpm ?? 0) > 0
-        return VStack(alignment: .leading, spacing: 6) {
-            MetricHeader(icon: Icons.heart, tint: EloColor.pink, tintBg: Color(hex: 0x361720), title: L("Heart rate"))
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(live ? "\(band.bpm ?? 0)" : "—").font(EloFont.grotesk(26)).foregroundColor(EloColor.text)
-                Text(L("bpm")).font(EloFont.inter(13)).foregroundColor(EloColor.secondary)
+        let value = band.lastBpm.map { "\($0)" } ?? "—"
+        return Button {
+            band.measureHeartRate(seconds: 30)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                MetricHeader(icon: Icons.heart, tint: EloColor.pink, tintBg: Color(hex: 0x361720), title: L("Heart rate"))
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(value).font(EloFont.grotesk(26)).foregroundColor(EloColor.text)
+                    Text(L("bpm")).font(EloFont.inter(13)).foregroundColor(EloColor.secondary)
+                    if band.measuringHR {
+                        Circle().fill(EloColor.pink).frame(width: 7, height: 7)
+                    }
+                }
+                Sparkline(values: band.bpmSamples).frame(width: 140, height: 22)
+                Text(heartDetail)
+                    .font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
+                    .lineLimit(1).minimumScaleFactor(0.8)
             }
-            Sparkline(values: band.bpmSamples).frame(width: 140, height: 22)
-            Text(L("Resting %@ bpm", band.restingBpm.map { "\($0)" } ?? "—"))
-                .font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
+            .padding(14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .card()
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .card()
+        .buttonStyle(.plain)
+        .disabled(!band.sessionReady)
     }
 }
 
