@@ -9,6 +9,7 @@ struct AlertsView: View {
     @State private var selected: UUID?
     @State private var sent: String?
     @State private var showSetup = false
+    @AppStorage("setupSeen") private var setupSeen = false
     @State private var editing = false
     @State private var draft = ""
 
@@ -69,6 +70,12 @@ struct AlertsView: View {
             .card(radius: 16)
         }
         .sheet(isPresented: $showSetup) { ShortcutSetupSheet() }
+        .onAppear {
+            if !setupSeen {
+                setupSeen = true
+                showSetup = true
+            }
+        }
         .alert(L("Quick replies"), isPresented: $editing) {
             TextField(L("One per line"), text: $draft, axis: .vertical)
             Button(L("Save")) { repliesRaw = draft }
@@ -244,38 +251,163 @@ struct FlowLayout: Layout {
     }
 }
 
-/// Passo a passo da automacao do Atalhos.
+/// Passo a passo da automacao do Atalhos, no estilo "ja direciona certinho".
 struct ShortcutSetupSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var band = Fit3Client.shared
+    @AppStorage("automationLink") private var automationLink = ""
+    @State private var testSent = false
+    @State private var editingLink = false
+    @State private var linkDraft = ""
+
+    private var hasLink: Bool { URL(string: automationLink)?.scheme?.hasPrefix("http") == true }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text(L("Forward alerts to the band")).font(EloFont.grotesk(26)).foregroundColor(EloColor.text)
-                step(1, L("Open Shortcuts → Automation → New Automation → Notification."))
-                step(2, L("Pick the app (WhatsApp, Messages…). Choose Run Immediately."))
-                step(3, L("Add the action “Send to Galaxy Fit3” (from Elo)."))
-                step(4, L("Set From = Notification Title, Message = Notification Body and App = the app name."))
-                step(5, L("Optional: a shortcut named “Elo Reply” receives “contact|reply|app” from the quick replies."))
-                Text(L("Keep Elo open in the background so the band stays connected."))
-                    .font(EloFont.inter(13)).foregroundColor(EloColor.secondary)
-                Button(L("Done")) { dismiss() }.buttonStyle(EloButtonStyle())
+        VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Text(L("Notifications")).font(EloFont.inter(17, .semibold)).foregroundColor(EloColor.text)
+                Spacer()
             }
-            .padding(24)
+            .overlay(alignment: .trailing) {
+                Button(L("Done")) { dismiss() }
+                    .font(EloFont.inter(16, .semibold))
+                    .foregroundColor(EloColor.accent)
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 20)
+            .padding(.bottom, 12)
+
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 12) {
+                    VStack(spacing: 6) {
+                        Text(L("See your notifications on your band"))
+                            .font(EloFont.grotesk(24)).foregroundColor(EloColor.text)
+                            .multilineTextAlignment(.center)
+                        Text(L("For when your phone is out of reach."))
+                            .font(EloFont.inter(14)).foregroundColor(EloColor.secondary)
+                    }
+                    .padding(.bottom, 6)
+
+                    step(1, L("Add the automation"),
+                         hasLink ? L("Shortcuts opens with everything ready. Tap “Add Automation”.")
+                                 : L("Build it once in Shortcuts (Elo action “Send to Galaxy Fit3” + Notification trigger), then paste its iCloud link below.")) {
+                        Button(hasLink ? L("Add to Shortcuts") : L("Paste iCloud link")) {
+                            if hasLink, let url = URL(string: automationLink) {
+                                UIApplication.shared.open(url)
+                            } else {
+                                linkDraft = UIPasteboard.general.string ?? ""
+                                editingLink = true
+                            }
+                        }
+                        .buttonStyle(EloButtonStyle(height: 48, fontSize: 15))
+                    }
+
+                    step(2, L("Turn it on"),
+                         L("iOS adds it turned off. In Shortcuts › Automation, open it, turn it on and choose “Run Immediately”.")) {
+                        Button(L("Open Shortcuts")) {
+                            if let url = URL(string: "shortcuts://") { UIApplication.shared.open(url) }
+                        }
+                        .buttonStyle(EloButtonStyle(filled: false, height: 48, fontSize: 15))
+                    }
+
+                    step(3, L("Choose your apps"),
+                         L("In “When I get a notification from”, tap + next to Messages and add WhatsApp, Telegram or any app you like.")) {
+                        HStack(spacing: 10) {
+                            EloIcon(paths: Icons.bell, size: 18, lineWidth: 2, color: EloColor.danger)
+                            Text(L("Messages"))
+                                .font(EloFont.inter(14, .semibold)).foregroundColor(EloColor.text)
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(Capsule().fill(EloColor.border))
+                            ZStack {
+                                Circle().fill(EloColor.accent)
+                                Text("+").font(EloFont.inter(18, .bold)).foregroundColor(EloColor.bg)
+                            }
+                            .frame(width: 30, height: 30)
+                            Text("WhatsApp, Telegram…").font(EloFont.inter(13)).foregroundColor(EloColor.secondary)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(10)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(EloColor.bg))
+                    }
+
+                    step(4, L("Show the message"),
+                         L("In Settings › Notifications › Show Previews, choose “Always”. In WhatsApp, also turn on Settings › Notifications › Show Preview. Otherwise your band will only say “Message”.")) {
+                        EmptyView()
+                    }
+
+                    step(5, L("Try it"), L("Your band will vibrate with a test alert.")) {
+                        Button(testSent ? L("Sent! Check your band") : L("Send a test to the band")) {
+                            band.sendNotification(from: "Elo", text: L("Notifications are working 🎉"), app: "Elo")
+                            testSent = true
+                        }
+                        .buttonStyle(EloButtonStyle(filled: !testSent, height: 48, fontSize: 15))
+                        .disabled(!band.sessionReady)
+                        if !band.sessionReady {
+                            Text(L("Connect the band first (↻ on Today)."))
+                                .font(EloFont.inter(12)).foregroundColor(EloColor.warn)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        note(Icons.console, L("Keep Elo running in the background."))
+                        note(Icons.bubble, L("Emojis work: the band shows them in color 😄"))
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .card(radius: 16)
+
+                    if hasLink {
+                        Button(L("Change automation link")) {
+                            linkDraft = automationLink
+                            editingLink = true
+                        }
+                        .font(EloFont.inter(13, .semibold))
+                        .foregroundColor(EloColor.tertiary)
+                        .padding(.top, 4)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 30)
+            }
         }
         .background(EloColor.bg.ignoresSafeArea())
         .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
         .preferredColorScheme(.dark)
+        .alert(L("Automation link"), isPresented: $editingLink) {
+            TextField("https://www.icloud.com/shortcuts/…", text: $linkDraft)
+            Button(L("Save")) { automationLink = linkDraft.trimmingCharacters(in: .whitespacesAndNewlines) }
+            Button(L("Cancel"), role: .cancel) {}
+        } message: {
+            Text(L("In Shortcuts, share your shortcut with the Notification trigger and choose Copy iCloud Link."))
+        }
     }
 
-    private func step(_ n: Int, _ text: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
+    private func step<Extra: View>(_ n: Int, _ title: String, _ text: String,
+                                   @ViewBuilder extra: () -> Extra) -> some View {
+        HStack(alignment: .top, spacing: 14) {
             Text("\(n)")
-                .font(EloFont.inter(14, .bold))
+                .font(EloFont.grotesk(18))
                 .foregroundColor(EloColor.bg)
-                .frame(width: 26, height: 26)
+                .frame(width: 36, height: 36)
                 .background(Circle().fill(EloColor.accent))
-            Text(text).font(EloFont.inter(15)).foregroundColor(EloColor.text).fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(EloFont.inter(17, .semibold)).foregroundColor(EloColor.text)
+                Text(text).font(EloFont.inter(14)).foregroundColor(EloColor.secondary)
+                    .lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+                extra()
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .card(radius: 18)
+    }
+
+    private func note(_ icon: [String], _ text: String) -> some View {
+        HStack(spacing: 10) {
+            EloIcon(paths: icon, size: 18, lineWidth: 2, color: EloColor.accent)
+            Text(text).font(EloFont.inter(13)).foregroundColor(EloColor.secondary)
         }
     }
 }
