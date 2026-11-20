@@ -1,23 +1,75 @@
 import CoreBluetooth
 import Foundation
 
-/// Cliente BLE da Galaxy Fit3: procura, conecta, pareia (o iOS mostra o codigo),
-/// abre a sessao SAP e expoe os comandos ja validados no PC.
+/// Um frame que passou pelo canal SAP (para a tela Console).
+struct ConsoleFrame: Identifiable, Codable {
+    let id: Int
+    let time: Date
+    let dir: String        // "TX" ou "RX"
+    let length: Int
+    let label: String
+    let hex: String
+    let error: Bool
+}
+
+/// Notificacao ja enviada a pulseira (lista "Na pulseira agora").
+struct SentNotification: Identifiable, Codable, Equatable {
+    var id = UUID()
+    let from: String
+    let app: String
+    let text: String
+    let date: Date
+}
+
+/// Idioma da pulseira (id do canal 0B).
+struct BandLanguage: Identifiable {
+    let id: UInt8
+    let name: String
+}
+
+/// Evento para o modelo 3D mostrar (mensagem ou ligacao real).
+struct LiveAlert: Equatable {
+    let screen: BandScreen
+    let date: Date
+}
+
+/// Cliente BLE da Galaxy Fit3. Unico para o app inteiro e para os Atalhos.
 final class Fit3Client: NSObject, ObservableObject {
 
-    @Published var status: String = "Desconectado"
-    @Published var connected: Bool = false
-    @Published var sessionReady: Bool = false
+    static let shared = Fit3Client()
+
+    @Published var status: String = L("Disconnected")
+    @Published var connected = false
+    @Published var connecting = false
+    @Published var sessionReady = false
     @Published var battery: Int?
     @Published var bpm: Int?
-    @Published var hrContact: Bool = false
+    @Published var hrContact = false
+    @Published var bpmSamples: [Int] = []
+    @Published var restingBpm: Int?
+    @Published var lastContact: Date?
     @Published var lines: [String] = []
+    @Published var frames: [ConsoleFrame] = []
+    @Published var frameCount = 0
+    @Published var mtu: Int?
+    @Published var rssi: Int?
+    @Published var recording = false
+    @Published var capture: [ConsoleFrame] = []
+    @Published var history: [SentNotification] = []
+    @Published var liveAlert: LiveAlert?
 
     static let sapService = CBUUID(string: "1A1A")
     static let sapNotifyUUID = CBUUID(string: "797AE4E9-2E58-4FE8-B48D-B5C79599FB9B")
     static let sapWriteUUID = CBUUID(string: "63E30BAD-4206-4596-839F-E47CBF7A4B5D")
     static let hrService = CBUUID(string: "180D")
     static let hrMeasUUID = CBUUID(string: "2A37")
+
+    /// Idiomas que a pulseira aceita no canal 0B (ver PROTOCOLO.md).
+    static let languages: [BandLanguage] = [
+        BandLanguage(id: 13, name: "English"),
+        BandLanguage(id: 14, name: "Español"),
+        BandLanguage(id: 55, name: "Português (Portugal)"),
+    ]
 
     private var central: CBCentralManager!
     private var peripheral: CBPeripheral?
@@ -26,7 +78,11 @@ final class Fit3Client: NSObject, ObservableObject {
     private var hrMeas: CBCharacteristic?
     private var queue: [(String, Data)] = []
     private var writing = false
+    private var wantConnection = false
+    private var userDisconnected = false
+    private var nextFrameId = 0
     private var notificationCounter = Int(Date().timeIntervalSince1970) % 100000
+    private var rssiTimer: Timer?
 
     private let clock: DateFormatter = {
         let f = DateFormatter()
@@ -34,53 +90,170 @@ final class Fit3Client: NSObject, ObservableObject {
         return f
     }()
 
-    override init() {
-        super.init()
-        central = CBCentralManager(delegate: self, queue: .main)
+    var bandLanguage: UInt8 {
+        get {
+            let v = UserDefaults.standard.integer(forKey: "bandLanguage")
+            return v == 0 ? 13 : UInt8(v)
+        }
+        set {
+            UserDefaults.standard.set(Int(newValue), forKey: "bandLanguage")
+        }
     }
 
-    // MARK: - Acoes da interface
+    private var savedPeripheralId: UUID? {
+        get { UserDefaults.standard.string(forKey: "bandPeripheral").flatMap(UUID.init(uuidString:)) }
+        set { UserDefaults.standard.set(newValue?.uuidString, forKey: "bandPeripheral") }
+    }
 
+    override init() {
+        super.init()
+        if let data = UserDefaults.standard.data(forKey: "sentHistory"),
+           let list = try? JSONDecoder().decode([SentNotification].self, from: data) {
+            history = list
+        }
+        central = CBCentralManager(delegate: self, queue: .main,
+                                   options: [CBCentralManagerOptionRestoreIdentifierKey: "elo.central"])
+    }
+
+    // MARK: - Acoes
+
+    /// Conecta direto pelo identificador salvo; se nao tiver, procura por "Fit3" no nome.
     func connect() {
+        wantConnection = true
+        userDisconnected = false
         guard central.state == .poweredOn else {
-            log("Bluetooth do iPhone nao esta ligado")
+            log("waiting for Bluetooth")
             return
         }
-        status = "Procurando a pulseira..."
-        log("procurando dispositivos com 'Fit3' no nome")
+        if peripheral != nil && (connected || connecting) { return }
+        connecting = true
+
+        if let id = savedPeripheralId,
+           let known = central.retrievePeripherals(withIdentifiers: [id]).first {
+            attach(known)
+            status = L("Connecting…")
+            log("reconnecting to saved band")
+            central.connect(known, options: nil)
+            return
+        }
+        if let already = central.retrieveConnectedPeripherals(withServices: [Fit3Client.sapService]).first {
+            attach(already)
+            status = L("Connecting…")
+            central.connect(already, options: nil)
+            return
+        }
+        status = L("Looking for the band…")
+        log("scanning for devices with 'Fit3' in the name")
         central.scanForPeripherals(withServices: nil, options: nil)
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
             guard let self = self, self.peripheral == nil else { return }
             self.central.stopScan()
-            self.status = "Nao encontrei a pulseira"
-            self.log("busca encerrada sem encontrar")
+            self.connecting = false
+            self.status = L("Band not found")
+            self.log("scan ended without finding the band")
         }
     }
 
     func disconnect() {
+        wantConnection = false
+        userDisconnected = true
         if let p = peripheral {
             central.cancelPeripheralConnection(p)
         }
     }
 
+    /// Esquece a pulseira salva (para parear de novo do zero).
+    func forgetBand() {
+        disconnect()
+        savedPeripheralId = nil
+    }
+
+    /// Para os Atalhos: garante sessao aberta antes de mandar algo.
+    func ensureReady(timeout: TimeInterval) async -> Bool {
+        await MainActor.run {
+            if !self.sessionReady { self.connect() }
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let ready = await MainActor.run { self.sessionReady }
+            if ready { return true }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+        return false
+    }
+
+    func sync() {
+        guard sessionReady else {
+            connect()
+            return
+        }
+        send(L("Sync time"), Fit3Protocol.timeSync())
+        send(L("Request: battery"), FrameCodec.cmd(0x0B, [0x02]))
+    }
+
     func vibrate() {
-        send("achar pulseira: vibrar", Fit3Protocol.findOn)
+        send(L("Find band: vibrate"), Fit3Protocol.findOn)
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.send("achar pulseira: parar", Fit3Protocol.findOff)
+            self?.send(L("Find band: stop"), Fit3Protocol.findOff)
         }
     }
 
     func sendNotification(from sender: String, text: String, app: String) {
         notificationCounter += 1
         let frame = Fit3Protocol.notification(from: sender, text: text, app: app, id: notificationCounter)
-        send("notificacao de \(sender)", frame)
+        send(L("Notification from %@", sender), frame)
+        let item = SentNotification(from: sender, app: app, text: text, date: Date())
+        history.insert(item, at: 0)
+        if history.count > 30 { history.removeLast(history.count - 30) }
+        if let data = try? JSONEncoder().encode(history) {
+            UserDefaults.standard.set(data, forKey: "sentHistory")
+        }
+        liveAlert = LiveAlert(screen: .message(app: app, from: sender, text: text), date: Date())
+    }
+
+    func sendCall(from caller: String, buzz: Bool) {
+        notificationCounter += 1
+        let frame = Fit3Protocol.notification(from: caller, text: L("Calling…"), app: L("Phone"),
+                                              id: notificationCounter)
+        send(L("Call from %@", caller), frame)
+        if buzz { vibrate() }
+        liveAlert = LiveAlert(screen: .call(name: caller), date: Date())
     }
 
     func setLanguage(_ id: UInt8) {
-        send("idioma id \(id)", Fit3Protocol.language(id))
+        bandLanguage = id
+        send(L("Band language (id %d)", Int(id)), Fit3Protocol.language(id))
     }
 
-    // MARK: - Fila de escrita (uma de cada vez, como no PC)
+    func toggleRecording() {
+        if recording {
+            recording = false
+        } else {
+            capture.removeAll()
+            recording = true
+        }
+    }
+
+    /// Arquivo .jsonl com a captura (ou com tudo, se nada foi gravado).
+    func exportJSONL() -> URL {
+        let source = capture.isEmpty ? frames : capture
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        var text = ""
+        for f in source {
+            if let d = try? enc.encode(f), let s = String(data: d, encoding: .utf8) {
+                text += s + "\n"
+            }
+        }
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("elo-capture-\(f.string(from: Date())).jsonl")
+        try? text.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    // MARK: - Fila de escrita (uma de cada vez)
 
     private func send(_ label: String, _ data: Data) {
         queue.append((label, data))
@@ -92,46 +265,93 @@ final class Fit3Client: NSObject, ObservableObject {
         let item = queue.removeFirst()
         writing = true
         log("TX \(item.0) (\(item.1.count) B)")
+        addFrame(dir: "TX", data: item.1, label: item.0, error: false)
         p.writeValue(item.1, for: w, type: .withResponse)
     }
 
     private func startSession() {
-        status = "Abrindo sessao..."
+        status = L("Opening session…")
         for item in Fit3Protocol.sessionSequence() {
             queue.append(item)
         }
+        // A config vinda do Fit3 Bridge deixa a pulseira em espanhol: corrige para o idioma escolhido.
+        queue.append((L("Band language (id %d)", Int(bandLanguage)), Fit3Protocol.language(bandLanguage)))
         pump()
         DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
             guard let self = self, self.connected else { return }
             self.sessionReady = true
-            self.status = "Pronta"
+            self.connecting = false
+            self.status = L("Ready")
+            self.lastContact = Date()
             if let hr = self.hrMeas, let p = self.peripheral {
                 p.setNotifyValue(true, for: hr)
             }
+            if let p = self.peripheral {
+                self.mtu = p.maximumWriteValueLength(for: .withoutResponse) + 3
+            }
+            self.startRSSI()
         }
+    }
+
+    private func startRSSI() {
+        rssiTimer?.invalidate()
+        peripheral?.readRSSI()
+        rssiTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            self?.peripheral?.readRSSI()
+        }
+    }
+
+    private func attach(_ p: CBPeripheral) {
+        peripheral = p
+        p.delegate = self
     }
 
     // MARK: - Recebido da pulseira
 
     private func handleRX(_ value: Data) {
+        lastContact = Date()
         switch FrameCodec.parse(value) {
         case .handshake:
-            log("RX handshake SAP (\(value.count) B)")
+            log("RX SAP handshake (\(value.count) B)")
+            addFrame(dir: "RX", data: value, label: L("Session ACK"), error: false)
         case .ack:
-            break
+            addFrame(dir: "RX", data: value, label: "ACK", error: false)
         case .invalid:
             log("RX ?? \(FrameCodec.hex([UInt8](value.prefix(24))))")
+            addFrame(dir: "RX", data: value, label: L("Invalid CRC"), error: true)
         case .frame(let f):
             let ch = String(format: "%02X", f.channel)
             let cm = String(format: "%02X", f.command)
-            log("RX canal \(ch) cmd \(cm) \(FrameCodec.hex(Array(f.data.prefix(16))))")
+            log("RX ch \(ch) cmd \(cm) \(FrameCodec.hex(Array(f.data.prefix(16))))")
+            var label = "\(ch)/\(cm)"
             if f.channel == 0x01 && f.command == 0x43 && f.data.count >= 2 {
                 battery = Int(f.data[1])
-            }
-            if f.channel == 0x0B && (f.command == 0x42 || f.command == 0x02) && f.data.count >= 4 {
+                label = L("Battery %d%%", Int(f.data[1]))
+            } else if f.channel == 0x0B && (f.command == 0x42 || f.command == 0x02) && f.data.count >= 4 {
                 battery = Int(f.data[3])
+                label = L("Battery %d%%", Int(f.data[3]))
+            } else if f.channel == 0x0B && f.command == 0x41 {
+                label = L("Language confirmed")
+            } else if f.channel == 0x01 && f.command == 0x41 {
+                label = L("Device info")
+            } else if f.channel == 0x1F {
+                label = L("Find band")
             }
+            addFrame(dir: "RX", data: value, label: label, error: false)
         }
+    }
+
+    private func addFrame(dir: String, data: Data, label: String, error: Bool) {
+        nextFrameId += 1
+        frameCount += 1
+        let bytes = [UInt8](data)
+        var hex = FrameCodec.hex(Array(bytes.prefix(28)))
+        if bytes.count > 28 { hex += " …" }
+        let frame = ConsoleFrame(id: nextFrameId, time: Date(), dir: dir, length: bytes.count,
+                                 label: label, hex: hex, error: error)
+        frames.append(frame)
+        if frames.count > 600 { frames.removeFirst(frames.count - 600) }
+        if recording { capture.append(frame) }
     }
 
     private func log(_ text: String) {
@@ -140,18 +360,51 @@ final class Fit3Client: NSObject, ObservableObject {
             lines.removeFirst(lines.count - 400)
         }
     }
+
+    private func resetLink() {
+        connected = false
+        sessionReady = false
+        writing = false
+        queue.removeAll()
+        sapNotify = nil
+        sapWrite = nil
+        hrMeas = nil
+        rssiTimer?.invalidate()
+        rssiTimer = nil
+    }
 }
 
 // MARK: - CBCentralManagerDelegate
 
 extension Fit3Client: CBCentralManagerDelegate {
 
+    func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
+        if let list = dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral], let p = list.first {
+            attach(p)
+            wantConnection = true
+            log("restored by iOS")
+        }
+    }
+
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
-        case .poweredOn: log("Bluetooth pronto")
-        case .poweredOff: log("Bluetooth desligado")
-        case .unauthorized: log("Sem permissao de Bluetooth (Ajustes > Elo)")
-        default: log("Bluetooth estado \(central.state.rawValue)")
+        case .poweredOn:
+            log("Bluetooth ready")
+            if let p = peripheral, p.state == .connected {
+                connected = true
+                p.discoverServices([Fit3Client.sapService, Fit3Client.hrService])
+            } else if wantConnection || savedPeripheralId != nil {
+                connect()
+            }
+        case .poweredOff:
+            log("Bluetooth off")
+            resetLink()
+            status = L("Bluetooth is off")
+        case .unauthorized:
+            log("no Bluetooth permission")
+            status = L("No Bluetooth permission")
+        default:
+            log("Bluetooth state \(central.state.rawValue)")
         }
     }
 
@@ -161,37 +414,40 @@ extension Fit3Client: CBCentralManagerDelegate {
         let name = peripheral.name ?? advName ?? ""
         guard name.lowercased().contains("fit3") else { return }
         central.stopScan()
-        self.peripheral = peripheral
-        peripheral.delegate = self
-        status = "Conectando..."
-        log("achei \(name) (RSSI \(RSSI))")
+        attach(peripheral)
+        savedPeripheralId = peripheral.identifier
+        rssi = RSSI.intValue
+        status = L("Connecting…")
+        log("found \(name) (RSSI \(RSSI))")
         central.connect(peripheral, options: nil)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         connected = true
-        status = "Conectada, lendo servicos..."
-        log("conectado")
+        savedPeripheralId = peripheral.identifier
+        status = L("Connected, reading services…")
+        log("connected")
         peripheral.discoverServices([Fit3Client.sapService, Fit3Client.hrService])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
-        status = "Falha ao conectar"
-        log("falha ao conectar: \(error?.localizedDescription ?? "-")")
-        self.peripheral = nil
+        connecting = false
+        status = L("Connection failed")
+        log("connection failed: \(error?.localizedDescription ?? "-")")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
-        connected = false
-        sessionReady = false
-        writing = false
-        queue.removeAll()
-        sapNotify = nil
-        sapWrite = nil
-        hrMeas = nil
-        self.peripheral = nil
-        status = "Desconectado"
-        log("desconectou: \(error?.localizedDescription ?? "normal")")
+        resetLink()
+        log("disconnected: \(error?.localizedDescription ?? "normal")")
+        if wantConnection && !userDisconnected {
+            // O iOS fica tentando sozinho, inclusive em segundo plano.
+            status = L("Reconnecting…")
+            connecting = true
+            central.connect(peripheral, options: nil)
+        } else {
+            connecting = false
+            status = L("Disconnected")
+        }
     }
 }
 
@@ -201,7 +457,7 @@ extension Fit3Client: CBPeripheralDelegate {
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         if let error = error {
-            log("erro nos servicos: \(error.localizedDescription)")
+            log("service error: \(error.localizedDescription)")
             return
         }
         for service in peripheral.services ?? [] {
@@ -213,8 +469,8 @@ extension Fit3Client: CBPeripheralDelegate {
         for ch in service.characteristics ?? [] {
             if ch.uuid == Fit3Client.sapNotifyUUID {
                 sapNotify = ch
-                status = "Pareando (confirme o codigo)..."
-                log("canal SAP encontrado; ativando notify (o iOS deve pedir o pareamento)")
+                status = L("Pairing (confirm the code)…")
+                log("SAP channel found; enabling notify (iOS may ask to pair)")
                 peripheral.setNotifyValue(true, for: ch)
             } else if ch.uuid == Fit3Client.sapWriteUUID {
                 sapWrite = ch
@@ -230,25 +486,29 @@ extension Fit3Client: CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic,
                     error: Error?) {
         if let error = error {
-            log("notify \(characteristic.uuid) falhou: \(error.localizedDescription)")
+            log("notify \(characteristic.uuid) failed: \(error.localizedDescription)")
             return
         }
         if characteristic.uuid == Fit3Client.sapNotifyUUID && characteristic.isNotifying {
-            log("SAP notify ativo (pareado)")
+            log("SAP notify active (paired)")
             startSession()
         } else if characteristic.uuid == Fit3Client.hrMeasUUID {
-            log("batimentos: inscrito no 2A37")
+            log("heart rate: subscribed to 2A37")
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         if let error = error {
-            log("escrita falhou: \(error.localizedDescription)")
+            log("write failed: \(error.localizedDescription)")
         }
         writing = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             self?.pump()
         }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?) {
+        if error == nil { rssi = RSSI.intValue }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
@@ -257,6 +517,11 @@ extension Fit3Client: CBPeripheralDelegate {
             if let hr = Fit3Protocol.heartRate(value) {
                 bpm = hr.bpm
                 hrContact = hr.contact
+                if hr.contact && hr.bpm > 0 {
+                    bpmSamples.append(hr.bpm)
+                    if bpmSamples.count > 120 { bpmSamples.removeFirst(bpmSamples.count - 120) }
+                    restingBpm = min(restingBpm ?? hr.bpm, hr.bpm)
+                }
             }
             return
         }

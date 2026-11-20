@@ -1,6 +1,7 @@
 name: Elo
 options:
   bundleIdPrefix: com.gmarquesx
+  developmentLanguage: en
   deploymentTarget:
     iOS: "17.0"
 targets:
@@ -13,17 +14,38 @@ targets:
       path: Elo/Info.plist
       properties:
         CFBundleDisplayName: Elo
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations:
+          - en
+          - pt-BR
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        UILaunchScreen: {}
+        UILaunchScreen:
+          UIColorName: ""
+        UIUserInterfaceStyle: Dark
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-        NSBluetoothAlwaysUsageDescription: "O Elo usa o Bluetooth para conversar com a sua Galaxy Fit3."
+        UIBackgroundModes:
+          - bluetooth-central
+          - location
+        UIAppFonts:
+          - Inter-Regular.ttf
+          - Inter-Medium.ttf
+          - Inter-SemiBold.ttf
+          - Inter-Bold.ttf
+          - SpaceGrotesk-Medium.ttf
+          - SpaceGrotesk-SemiBold.ttf
+          - SpaceGrotesk-Bold.ttf
+          - JetBrainsMono-Regular.ttf
+          - JetBrainsMono-Medium.ttf
+        NSBluetoothAlwaysUsageDescription: "Elo uses Bluetooth to talk to your Galaxy Fit3."
+        NSLocationWhenInUseUsageDescription: "Elo uses GPS to measure the distance and pace of your runs."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Elo keeps recording your run while the screen is off."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gmarquesx.elo
-        MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "2"
         TARGETED_DEVICE_FAMILY: "1"
         SWIFT_VERSION: "5.0"
         CODE_SIGNING_ALLOWED: "NO"

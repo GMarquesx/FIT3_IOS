@@ -1,0 +1,3 @@
+"NSBluetoothAlwaysUsageDescription" = "O Elo usa o Bluetooth para conversar com a sua Galaxy Fit3.";
+"NSLocationWhenInUseUsageDescription" = "O Elo usa o GPS para medir a distância e o ritmo das suas corridas.";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "O Elo continua gravando a corrida com a tela apagada.";

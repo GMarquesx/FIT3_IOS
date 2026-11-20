@@ -119,16 +119,16 @@ enum Fit3Protocol {
     /// Sequencia de abertura de sessao, na ordem que funcionou no PC.
     static func sessionSequence() -> [(String, Data)] {
         return [
-            ("abrir sessao", Data(sessionOpen)),
-            ("setup 1", FrameCodec.build(FrameCodec.fromHex("01 40 01 01 01 04 02 05 00 0E"))),
-            ("setup 2", FrameCodec.build(FrameCodec.fromHex("01 40 01 01 02 01 01"))),
-            ("horario", timeSync()),
-            ("fuso", Data(timezoneFrame)),
-            ("config", Data(configFrame)),
-            ("0B/02", FrameCodec.cmd(0x0B, [0x02])),
+            (L("Open SAP session"), Data(sessionOpen)),
+            ("Setup 1", FrameCodec.build(FrameCodec.fromHex("01 40 01 01 01 04 02 05 00 0E"))),
+            ("Setup 2", FrameCodec.build(FrameCodec.fromHex("01 40 01 01 02 01 01"))),
+            (L("Sync time"), timeSync()),
+            (L("Time zone"), Data(timezoneFrame)),
+            (L("Settings"), Data(configFrame)),
+            (L("Request: battery"), FrameCodec.cmd(0x0B, [0x02])),
             ("07/0D", FrameCodec.cmd(0x07, [0x0D])),
             ("07/0E", FrameCodec.cmd(0x07, [0x0E])),
-            ("concluir config", FrameCodec.build(FrameCodec.fromHex("01 40 01 01 84 01"))),
+            (L("Finish setup"), FrameCodec.build(FrameCodec.fromHex("01 40 01 01 84 01"))),
         ]
     }
 
