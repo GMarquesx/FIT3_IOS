@@ -50,3 +50,20 @@ Toda vez que algo dentro de `ios/` mudar e você der `git push`, ele compila de 
 3. Quando o iOS mostrar o pedido de pareamento, confira o código com o da pulseira e confirme.
 4. Quando o status ficar **Pronta**: teste **Vibrar** e **Enviar para a pulseira**.
 5. Se der algo errado, tire print do **Console** e me mande.
+
+## v0.2 – telas do design, Atalhos e idiomas
+
+- **Telas**: Hoje (modelo 3D com as mesmas transformações CSS do design), Saúde, Treino (GPS do iPhone),
+  Avisos, Console (frames SAP ao vivo, exportar `.jsonl`, ferramentas de teste) e, a partir do Hoje,
+  Perfil e "Sua Galaxy Fit3" (personalização do modelo 3D).
+- **Pulseira em inglês**: depois de abrir a sessão o app manda `0B/01 04 <id> 00` (padrão id 13 = English).
+  Dá para trocar em Console → Idioma da pulseira.
+- **App em inglês e português (Brasil)**: segue o idioma do iPhone (`pt-BR.lproj/Localizable.strings`).
+- **Atalhos** (App Intents): "Enviar para a Galaxy Fit3", "Achar minha Galaxy Fit3", "Mostrar ligação na
+  Galaxy Fit3" e "Bateria da Galaxy Fit3".
+  - No iOS 27: Atalhos → Automação → Nova → **Notificação** → escolha o app → Executar Imediatamente →
+    ação "Enviar para a Galaxy Fit3" com De = Título, Mensagem = Corpo e App = nome do app.
+  - Respostas rápidas (Avisos) abrem o atalho **"Elo Reply"** com o texto `contato|resposta|app`.
+- **Ainda sem dados da pulseira** (canal não decodificado): passos, sono, calorias, SpO₂, histórico para o
+  Saúde, mostrador real e espelhamento do treino. Essas áreas aparecem com "—" ou "em breve".
+- Fontes embutidas: Inter, Space Grotesk e JetBrains Mono (licença OFL em `Elo/Fonts/*-OFL.txt`).
