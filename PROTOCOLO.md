@@ -78,6 +78,10 @@
   `02 01 03 0a` + 10 pares `00 <tipo> 01 <id>`: 01→01, 02→02, 03→03, 04→04, 05→05, 07→06, 08→07, 09→08, 0C→09, 06→0A.
   Hipótese: lista de métricas (passos, frequência, sono, SpO₂…). Próximo passo: sonda do app iOS (Console → Sonda de saúde).
 - `0A/04` e `0A/89` começam com `e0 SS SS` (mesmo contador do A2) → o canal 0A tem um sub-protocolo com número de sequência.
+- Sonda rodada 1 (20/11): pedidos tipo 00 no 0x18 (18/01..0F, com 01 e 00 01) → só ACK de transporte, sem resposta.
+  `18/80` e `18/40 02 01` → pulseira reenviou `18/C0` (tabela). Conclusão: o 0x18 responde a pedidos tipo 0x80/0x40
+  com respostas tipo 0xC0. Rodada 2: 18/81..8F, 18/81 <tipo>, 18/82 <tipo>.
+- `04/86 00` chega em pares a cada poucos segundos em alguns momentos (pulseira esperando resposta?).
 
 ## Canal 0x0F = mostradores (watch faces)
 - Ao conectar a pulseira manda `0F/00 01 <n> {03 <id> 02 <posição>} x n`. Ex.: 19 ids; posições 01..08 = carrossel,

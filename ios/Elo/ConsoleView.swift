@@ -216,7 +216,7 @@ struct ConsoleView: View {
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(Capsule().fill(EloColor.warnBg))
                 }
-                Text(L("Sends %d candidate requests (channel 0x18 first) to find steps, sleep and SpO₂. Takes about 2 minutes. Watch the band and note anything that shows up, then export the .jsonl.", Fit3Client.probeList().count))
+                Text(L("Sends %d candidate requests (round 2: 0x18 type-80 requests) to find steps, sleep and SpO₂. Takes about 2 minutes. Watch the band and note anything that shows up, then export the .jsonl.", Fit3Client.probeList().count))
                     .font(EloFont.inter(12)).foregroundColor(EloColor.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
                     Text(L("Auto-reply 0A/A2 keep-alive")).font(EloFont.inter(14, .medium)).foregroundColor(EloColor.text)

@@ -338,7 +338,8 @@ final class Fit3Client: NSObject, ObservableObject {
 
     // MARK: - Sonda (procura os comandos de passos, sono etc.)
 
-    /// Pedidos candidatos: canal 0x18 (saude?) primeiro, depois canais vizinhos.
+    /// Rodada 2: o canal 0x18 so respondeu a pedidos do tipo 0x80 (18/80 e 18/40 02 01 devolveram a
+    /// tabela 18/C0). Aqui vao os pedidos 0x81..0x8F, com e sem o id do tipo de dado (01..0A da tabela).
     static func probeList() -> [(String, Data)] {
         var list: [(String, Data)] = []
         func add(_ ch: UInt8, _ data: [UInt8]) {
@@ -346,14 +347,11 @@ final class Fit3Client: NSObject, ObservableObject {
                 + (data.count > 1 ? " " + FrameCodec.hex(Array(data.dropFirst())) : "")
             list.append((label, FrameCodec.cmd(ch, data)))
         }
-        for c: UInt8 in 0x01...0x0F { add(0x18, [c]) }
-        for c: UInt8 in 0x01...0x05 { add(0x18, [c, 0x01]) }
-        for c: UInt8 in 0x01...0x05 { add(0x18, [c, 0x00, 0x01]) }
-        add(0x18, [0x80])
-        add(0x18, [0x40, 0x02, 0x01])
-        for c: UInt8 in 0x03...0x06 { add(0x09, [c]) }
-        for c: UInt8 in 0x01...0x05 { add(0x04, [c]) }
-        for c: UInt8 in 0x01...0x02 { add(0x0F, [c]) }
+        for c: UInt8 in 0x81...0x8F { add(0x18, [c]) }
+        for t: UInt8 in 0x01...0x0A { add(0x18, [0x81, t]) }
+        for t: UInt8 in 0x01...0x0A { add(0x18, [0x82, t]) }
+        for c: UInt8 in 0x81...0x86 { add(0x18, [c, 0x02, 0x01]) }
+        for c: UInt8 in 0x41...0x46 { add(0x18, [c, 0x02, 0x01]) }
         return list
     }
 

@@ -241,7 +241,7 @@
 "In Shortcuts, share your shortcut with the Notification trigger and choose Copy iCloud Link." = "No Atalhos, compartilhe o seu atalho com o gatilho Notificação e escolha Copiar Link do iCloud.";
 "Health %@" = "Saúde %@";
 "Health probe" = "Sonda de saúde";
-"Sends %d candidate requests (channel 0x18 first) to find steps, sleep and SpO₂. Takes about 2 minutes. Watch the band and note anything that shows up, then export the .jsonl." = "Manda %d pedidos candidatos (canal 0x18 primeiro) para achar passos, sono e SpO₂. Leva uns 2 minutos. Fique de olho na pulseira, anote o que aparecer e depois exporte o .jsonl.";
+"Sends %d candidate requests (round 2: 0x18 type-80 requests) to find steps, sleep and SpO₂. Takes about 2 minutes. Watch the band and note anything that shows up, then export the .jsonl." = "Manda %d pedidos candidatos (rodada 2: pedidos tipo 0x80 no canal 0x18) para achar passos, sono e SpO₂. Leva uns 2 minutos. Fique de olho na pulseira, anote o que aparecer e depois exporte o .jsonl.";
 "Auto-reply 0A/A2 keep-alive" = "Responder o keep-alive 0A/A2";
 "Stop probe (%d/%d)" = "Parar sonda (%d/%d)";
 "Start probe" = "Iniciar sonda";
