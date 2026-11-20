@@ -10,6 +10,7 @@ struct ConsoleFrame: Identifiable, Codable {
     let label: String
     let hex: String
     let error: Bool
+    var full: String? = nil
 }
 
 /// Notificacao ja enviada a pulseira (lista "Na pulseira agora").
@@ -57,6 +58,9 @@ final class Fit3Client: NSObject, ObservableObject {
     @Published var capture: [ConsoleFrame] = []
     @Published var history: [SentNotification] = []
     @Published var liveAlert: LiveAlert?
+    @Published var probeRunning = false
+    @Published var probeIndex = 0
+    @Published var probeTotal = 0
 
     static let sapService = CBUUID(string: "1A1A")
     static let sapNotifyUUID = CBUUID(string: "797AE4E9-2E58-4FE8-B48D-B5C79599FB9B")
@@ -83,6 +87,13 @@ final class Fit3Client: NSObject, ObservableObject {
     private var nextFrameId = 0
     private var notificationCounter = Int(Date().timeIntervalSince1970) % 100000
     private var rssiTimer: Timer?
+    private var probeItems: [DispatchWorkItem] = []
+
+    /// Responde o 0A/A2 periodico com eco em 0A/62 (no PC isso fez a pulseira parar de repetir).
+    var autoAckA2: Bool {
+        get { UserDefaults.standard.object(forKey: "autoAckA2") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "autoAckA2"); objectWillChange.send() }
+    }
 
     private let clock: DateFormatter = {
         let f = DateFormatter()
@@ -225,6 +236,61 @@ final class Fit3Client: NSObject, ObservableObject {
         send(L("Band language (id %d)", Int(id)), Fit3Protocol.language(id))
     }
 
+    // MARK: - Sonda (procura os comandos de passos, sono etc.)
+
+    /// Pedidos candidatos: canal 0x18 (saude?) primeiro, depois canais vizinhos.
+    static func probeList() -> [(String, Data)] {
+        var list: [(String, Data)] = []
+        func add(_ ch: UInt8, _ data: [UInt8]) {
+            let label = String(format: "Probe %02X/%02X", ch, data.first ?? 0)
+                + (data.count > 1 ? " " + FrameCodec.hex(Array(data.dropFirst())) : "")
+            list.append((label, FrameCodec.cmd(ch, data)))
+        }
+        for c: UInt8 in 0x01...0x0F { add(0x18, [c]) }
+        for c: UInt8 in 0x01...0x05 { add(0x18, [c, 0x01]) }
+        for c: UInt8 in 0x01...0x05 { add(0x18, [c, 0x00, 0x01]) }
+        add(0x18, [0x80])
+        add(0x18, [0x40, 0x02, 0x01])
+        for c: UInt8 in 0x03...0x06 { add(0x09, [c]) }
+        for c: UInt8 in 0x01...0x05 { add(0x04, [c]) }
+        for c: UInt8 in 0x01...0x02 { add(0x0F, [c]) }
+        return list
+    }
+
+    func startProbe() {
+        guard sessionReady, !probeRunning else { return }
+        let list = Fit3Client.probeList()
+        probeItems.forEach { $0.cancel() }
+        probeItems = []
+        if !recording { toggleRecording() }
+        probeRunning = true
+        probeIndex = 0
+        probeTotal = list.count
+        log("probe: \(list.count) requests, 2.5 s apart")
+        for (i, item) in list.enumerated() {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self = self, self.probeRunning else { return }
+                self.probeIndex = i + 1
+                self.send("#\(i + 1) " + item.0, item.1)
+            }
+            probeItems.append(work)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 * Double(i), execute: work)
+        }
+        let done = DispatchWorkItem { [weak self] in
+            self?.probeRunning = false
+            self?.log("probe finished")
+        }
+        probeItems.append(done)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 * Double(list.count) + 4, execute: done)
+    }
+
+    func stopProbe() {
+        probeItems.forEach { $0.cancel() }
+        probeItems = []
+        probeRunning = false
+        log("probe stopped")
+    }
+
     func toggleRecording() {
         if recording {
             recording = false
@@ -336,6 +402,13 @@ final class Fit3Client: NSObject, ObservableObject {
                 label = L("Device info")
             } else if f.channel == 0x1F {
                 label = L("Find band")
+            } else if f.channel == 0x0A && f.command == 0xA2 {
+                label = "0A/A2 (keep-alive)"
+                if autoAckA2 {
+                    send("Ack 0A/62", FrameCodec.cmd(0x0A, [0x62] + f.data))
+                }
+            } else if f.channel == 0x18 {
+                label = L("Health %@", "18/" + cm)
             }
             addFrame(dir: "RX", data: value, label: label, error: false)
         }
@@ -348,7 +421,7 @@ final class Fit3Client: NSObject, ObservableObject {
         var hex = FrameCodec.hex(Array(bytes.prefix(28)))
         if bytes.count > 28 { hex += " …" }
         let frame = ConsoleFrame(id: nextFrameId, time: Date(), dir: dir, length: bytes.count,
-                                 label: label, hex: hex, error: error)
+                                 label: label, hex: hex, error: error, full: FrameCodec.hex(bytes))
         frames.append(frame)
         if frames.count > 600 { frames.removeFirst(frames.count - 600) }
         if recording { capture.append(frame) }
@@ -362,6 +435,7 @@ final class Fit3Client: NSObject, ObservableObject {
     }
 
     private func resetLink() {
+        if probeRunning { stopProbe() }
         connected = false
         sessionReady = false
         writing = false

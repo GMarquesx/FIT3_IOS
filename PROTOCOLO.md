@@ -68,6 +68,17 @@
 
 \* Não publicar nº de série / TWID no repositório.
 
+## Tipo do comando (2 bits altos do CMD) – visto nos logs de 19/11
+- `cmd & 0x3F` = id do comando; `cmd & 0xC0` = tipo. Respostas: 01/01→41, 01/83→43, 07/50→**D0**, 07/0D→4D.
+- A pulseira também inicia mensagens (tipo `0x80`): `04/86`, `07/90`, `0A/89`, `0A/A2`, `18/C0`, `1A/80`.
+- **`0A/A2` = keep-alive com contador** (`02 e0 SS SS e1 2d 01`, SS = 16 bits LE, +2 a cada envio), repetido a cada ~19,6 s
+  enquanto não é respondido. Eco em **`0A/62`** com os mesmos dados fez a pulseira parar de repetir (log `testar`, 80,4 s).
+  O app iOS responde automaticamente (Console → "Responder o keep-alive 0A/A2").
+- **Canal 0x18 (saúde?)**: aparece só depois do `01/84 01`. `18/C0` traz uma tabela
+  `02 01 03 0a` + 10 pares `00 <tipo> 01 <id>`: 01→01, 02→02, 03→03, 04→04, 05→05, 07→06, 08→07, 09→08, 0C→09, 06→0A.
+  Hipótese: lista de métricas (passos, frequência, sono, SpO₂…). Próximo passo: sonda do app iOS (Console → Sonda de saúde).
+- `0A/04` e `0A/89` começam com `e0 SS SS` (mesmo contador do A2) → o canal 0A tem um sub-protocolo com número de sequência.
+
 ## Em aberto
 - ~~Qual mensagem conclui a configuração~~ → **01/84 01** ✅
 - Reconexão com a chave salva: a pulseira derruba em 0,1 s. Por enquanto: despear + parear a cada conexão.

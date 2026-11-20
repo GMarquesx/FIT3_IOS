@@ -205,6 +205,36 @@ struct ConsoleView: View {
             .padding(14)
             .card(radius: 16)
 
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(L("Health probe")).font(EloFont.inter(15, .semibold)).foregroundColor(EloColor.text)
+                    Spacer()
+                    Text(L("Experimental"))
+                        .font(EloFont.inter(11, .semibold)).foregroundColor(EloColor.warn)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(Capsule().fill(EloColor.warnBg))
+                }
+                Text(L("Sends %d candidate requests (channel 0x18 first) to find steps, sleep and SpO₂. Takes about 2 minutes. Watch the band and note anything that shows up, then export the .jsonl.", Fit3Client.probeList().count))
+                    .font(EloFont.inter(12)).foregroundColor(EloColor.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Text(L("Auto-reply 0A/A2 keep-alive")).font(EloFont.inter(14, .medium)).foregroundColor(EloColor.text)
+                    Spacer()
+                    EloToggle(isOn: Binding(get: { band.autoAckA2 }, set: { band.autoAckA2 = $0 }))
+                }
+                if band.probeRunning {
+                    ProgressView(value: Double(band.probeIndex), total: Double(max(band.probeTotal, 1)))
+                        .tint(EloColor.accent)
+                    Button(L("Stop probe (%d/%d)", band.probeIndex, band.probeTotal)) { band.stopProbe() }
+                        .buttonStyle(EloButtonStyle(filled: false, height: 48, fontSize: 15))
+                } else {
+                    Button(L("Start probe")) { band.startProbe() }
+                        .buttonStyle(EloButtonStyle(height: 48, fontSize: 15))
+                        .disabled(!band.sessionReady)
+                }
+            }
+            .padding(14)
+            .card(radius: 16)
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(L("Log")).font(EloFont.inter(15, .semibold)).foregroundColor(EloColor.text)
                 ForEach(Array(band.lines.suffix(60).enumerated()), id: \.offset) { item in
