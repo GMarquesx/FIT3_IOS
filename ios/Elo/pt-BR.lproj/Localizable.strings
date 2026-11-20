@@ -245,3 +245,9 @@
 "Auto-reply 0A/A2 keep-alive" = "Responder o keep-alive 0A/A2";
 "Stop probe (%d/%d)" = "Parar sonda (%d/%d)";
 "Start probe" = "Iniciar sonda";
+"Buzz" = "Vibrar";
+"Buzz: stop" = "Vibrar: parar";
+"Vibrate on messages" = "Vibrar nas mensagens";
+"A short buzz when an alert arrives" = "Uma vibração curta quando chega um aviso";
+"Wait between buzzes" = "Intervalo entre vibrações";
+"None" = "Nenhum";

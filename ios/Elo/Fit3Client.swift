@@ -88,6 +88,19 @@ final class Fit3Client: NSObject, ObservableObject {
     private var notificationCounter = Int(Date().timeIntervalSince1970) % 100000
     private var rssiTimer: Timer?
     private var probeItems: [DispatchWorkItem] = []
+    private var lastBuzz: Date = .distantPast
+
+    /// Vibra rapidinho quando chega uma notificacao (a pulseira nao vibra sozinha com o 07/80).
+    var vibrateOnArrival: Bool {
+        get { UserDefaults.standard.object(forKey: "vibrateOnArrival") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "vibrateOnArrival"); objectWillChange.send() }
+    }
+
+    /// Intervalo minimo entre vibracoes, em segundos (grupos nao vibram a cada mensagem).
+    var vibrationCooldown: Int {
+        get { UserDefaults.standard.object(forKey: "vibrationCooldown") as? Int ?? 30 }
+        set { UserDefaults.standard.set(newValue, forKey: "vibrationCooldown"); objectWillChange.send() }
+    }
 
     /// Responde o 0A/A2 periodico com eco em 0A/62 (no PC isso fez a pulseira parar de repetir).
     var autoAckA2: Bool {
@@ -212,7 +225,18 @@ final class Fit3Client: NSObject, ObservableObject {
     func sendNotification(from sender: String, text: String, app: String) {
         notificationCounter += 1
         let frame = Fit3Protocol.notification(from: sender, text: text, app: app, id: notificationCounter)
-        send(L("Notification from %@", sender), frame)
+        let label = L("Notification from %@", sender)
+        if vibrateOnArrival && Date().timeIntervalSince(lastBuzz) >= Double(vibrationCooldown) {
+            // Vibra antes (achar pulseira por ~0,7 s) e manda a notificacao por cima.
+            lastBuzz = Date()
+            send(L("Buzz"), Fit3Protocol.findOn)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+                self?.send(L("Buzz: stop"), Fit3Protocol.findOff)
+                self?.send(label, frame)
+            }
+        } else {
+            send(label, frame)
+        }
         let item = SentNotification(from: sender, app: app, text: text, date: Date())
         history.insert(item, at: 0)
         if history.count > 30 { history.removeLast(history.count - 30) }

@@ -57,6 +57,26 @@ struct AlertsView: View {
             onBandSection
             repliesSection
 
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("Vibrate on messages")).font(EloFont.inter(15, .medium)).foregroundColor(EloColor.text)
+                        Text(L("A short buzz when an alert arrives")).font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    EloToggle(isOn: Binding(get: { band.vibrateOnArrival }, set: { band.vibrateOnArrival = $0 }))
+                }
+                if band.vibrateOnArrival {
+                    Text(L("Wait between buzzes")).font(EloFont.inter(12, .medium)).foregroundColor(EloColor.secondary)
+                    Segmented(options: [("0", L("None")), ("15", "15 s"), ("30", "30 s"), ("60", "1 min"), ("300", "5 min")],
+                              selection: Binding(get: { "\(band.vibrationCooldown)" },
+                                                 set: { band.vibrationCooldown = Int($0) ?? 30 }))
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .card(radius: 16)
+
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(L("Vibrate on calls")).font(EloFont.inter(15, .medium)).foregroundColor(EloColor.text)
