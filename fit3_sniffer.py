@@ -1,0 +1,271 @@
+#!/usr/bin/env python3
+"""
+fit3_sniffer.py - Explorador / sniffer BLE do Samsung Galaxy Fit3 (etapa 1)
+
+Objetivo: conectar na pulseira pelo PC e registrar em hex TUDO que ela manda,
+principalmente os frames do canal SAP (servico 1A1A) que o Fit3 Bridge rejeita.
+
+Requisitos:
+    Python 3.10+
+    pip install bleak
+
+Uso:
+    python fit3_sniffer.py scan                      # procura a pulseira
+    python fit3_sniffer.py explore [--pair]          # lista servicos/caracteristicas e le o que for legivel
+    python fit3_sniffer.py listen  [--pair] [--init] [--seconds 180]
+                                                     # inscreve em todas as notificacoes e registra RX/TX
+
+    --address XX:XX:XX:XX:XX:XX   usa um endereco especifico (senao procura por nome "Fit3")
+    --pair                        pede pareamento/bond ao Windows antes de usar o canal SAP
+    --init                        envia o frame de abertura de sessao SAP visto no log do Fit3 Bridge
+
+Antes de rodar: desligue o Bluetooth do iPhone (a pulseira so aceita uma conexao por vez).
+Os logs ficam em ./logs/fit3_<comando>_AAAAMMDD_HHMMSS.jsonl (uma linha JSON por evento).
+"""
+
+import argparse
+import asyncio
+import datetime as dt
+import json
+import sys
+from pathlib import Path
+
+from bleak import BleakClient, BleakScanner
+from bleak.backends.characteristic import BleakGATTCharacteristic
+
+# --------------------------------------------------------------------------
+# O que ja sabemos pelo log do Fit3 Bridge
+# --------------------------------------------------------------------------
+SAP_SERVICE = "00001a1a-0000-1000-8000-00805f9b34fb"
+
+CHAR_NAMES = {
+    "797ae4e9-2e58-4fe8-b48d-b5c79599fb9b": "SAP_797A",
+    "63e30bad-4206-4596-839f-e47cbf7a4b5d": "SAP_63E3",
+    "00002a37-0000-1000-8000-00805f9b34fb": "HR_MEAS",
+    "00002a38-0000-1000-8000-00805f9b34fb": "HR_LOC",
+    "00002a39-0000-1000-8000-00805f9b34fb": "HR_CTRL",
+    "00002a29-0000-1000-8000-00805f9b34fb": "MANUF",
+    "00002a24-0000-1000-8000-00805f9b34fb": "MODEL",
+    "00002a25-0000-1000-8000-00805f9b34fb": "SERIAL",
+    "00002a27-0000-1000-8000-00805f9b34fb": "HW_REV",
+    "00002a26-0000-1000-8000-00805f9b34fb": "FW_REV",
+    "00002a28-0000-1000-8000-00805f9b34fb": "SW_REV",
+    "00002a23-0000-1000-8000-00805f9b34fb": "SYS_ID",
+    "00002a2a-0000-1000-8000-00805f9b34fb": "REG_CERT",
+    "00002a50-0000-1000-8000-00805f9b34fb": "PNP_ID",
+}
+
+# Primeiro TX do Fit3 Bridge depois de "canal SAP listo -> iniciando sesion"
+# (116 bytes: cabecalho 68 15 04 01 00 FF 03 + "SAP_<id>" + "iPhone" + "samsung" + "samsung" + parametros)
+SESSION_OPEN_HEX = (
+    "68 15 04 01 00 FF 03 53 41 50 5F 39 37 37 30 30 31 44 45 42 35 35 31 34 30 31 38 41 43 33 41 35 "
+    "31 32 34 42 36 32 33 34 45 31 38 01 01 F4 00 00 03 D4 69 50 68 6F 6E 65 00 00 00 00 00 00 00 00 "
+    "00 00 73 61 6D 73 75 6E 67 00 00 00 00 00 00 00 00 00 73 61 6D 73 75 6E 67 00 00 00 00 00 00 00 "
+    "00 00 02 00 00 00 08 00 00 00 08 00 00 00 03 00 00 00 00 00"
+)
+
+BAND_NAME_HINTS = ("fit3", "galaxy fit")
+
+
+# --------------------------------------------------------------------------
+# Utilitarios
+# --------------------------------------------------------------------------
+def hexs(data: bytes) -> str:
+    return " ".join(f"{b:02X}" for b in data)
+
+
+def ascii_view(data: bytes) -> str:
+    return "".join(chr(b) if 32 <= b < 127 else "." for b in data)
+
+
+def short_uuid(uuid: str) -> str:
+    uuid = uuid.lower()
+    return CHAR_NAMES.get(uuid, uuid[:8])
+
+
+class Logger:
+    """Imprime no console e grava JSONL para analisarmos depois."""
+
+    def __init__(self, cmd: str) -> None:
+        logs = Path("logs")
+        logs.mkdir(exist_ok=True)
+        stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.path = logs / f"fit3_{cmd}_{stamp}.jsonl"
+        self._f = self.path.open("a", encoding="utf-8")
+        self._t0 = dt.datetime.now()
+
+    def _write(self, rec: dict) -> None:
+        rec["t"] = round((dt.datetime.now() - self._t0).total_seconds(), 3)
+        rec["ts"] = dt.datetime.now().isoformat(timespec="milliseconds")
+        self._f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self._f.flush()
+
+    def event(self, msg: str) -> None:
+        print(f"[{dt.datetime.now():%H:%M:%S}] {msg}")
+        self._write({"kind": "event", "msg": msg})
+
+    def data(self, direction: str, uuid: str, data: bytes) -> None:
+        print(f"[{dt.datetime.now():%H:%M:%S}] {direction} {short_uuid(uuid):<9} {len(data):>4} B  {hexs(data)}")
+        print(f"{'':>30}|{ascii_view(data)}|")
+        self._write({"kind": direction, "uuid": uuid, "name": short_uuid(uuid),
+                     "len": len(data), "hex": hexs(data)})
+
+
+async def find_band(address: str | None):
+    if address:
+        print(f"[..] procurando {address} ...")
+        dev = await BleakScanner.find_device_by_address(address, timeout=20.0)
+    else:
+        print("[..] procurando pulseira com 'Fit3' no nome (20 s) ...")
+        dev = await BleakScanner.find_device_by_filter(
+            lambda d, adv: bool(d.name) and any(h in d.name.lower() for h in BAND_NAME_HINTS),
+            timeout=20.0,
+        )
+    if dev is None:
+        print("[erro] pulseira nao encontrada. Confira:\n"
+              "  - Bluetooth do iPhone DESLIGADO (ela so aceita uma conexao)\n"
+              "  - pulseira acordada e perto do PC\n"
+              "  - rode 'scan' e use --address com o endereco que aparecer")
+        sys.exit(1)
+    print(f"[ok] encontrada: {dev.name}  {dev.address}")
+    return dev
+
+
+async def maybe_pair(client: BleakClient, log: Logger, pair: bool) -> None:
+    if not pair:
+        return
+    try:
+        log.event(f"pair() -> {await client.pair()}")
+    except Exception as e:  # noqa: BLE001
+        log.event(f"pair() falhou: {e}")
+
+
+# --------------------------------------------------------------------------
+# scan
+# --------------------------------------------------------------------------
+async def cmd_scan(args) -> None:
+    print("[..] escaneando BLE por 12 s ...")
+    found = await BleakScanner.discover(timeout=12.0, return_adv=True)
+    rows = sorted(found.values(), key=lambda da: da[1].rssi, reverse=True)
+    for dev, adv in rows:
+        name = dev.name or adv.local_name or "-"
+        mark = "  <== provavel Fit3" if any(h in name.lower() for h in BAND_NAME_HINTS) else ""
+        print(f"{dev.address}  RSSI {adv.rssi:>4}  {name}{mark}")
+        if adv.service_uuids:
+            print(f"{'':>19}servicos: {', '.join(short_uuid(u) for u in adv.service_uuids)}")
+        if adv.manufacturer_data:
+            for cid, payload in adv.manufacturer_data.items():
+                print(f"{'':>19}fabricante 0x{cid:04X}: {hexs(payload)}")
+    print(f"\n[ok] {len(rows)} dispositivos")
+
+
+# --------------------------------------------------------------------------
+# explore
+# --------------------------------------------------------------------------
+async def cmd_explore(args) -> None:
+    dev = await find_band(args.address)
+    log = Logger("explore")
+    async with BleakClient(dev) as client:
+        log.event(f"conectado: {dev.name} {dev.address}  MTU={client.mtu_size}")
+        await maybe_pair(client, log, args.pair)
+        for svc in client.services:
+            tag = "  <== canal SAP" if svc.uuid.lower() == SAP_SERVICE else ""
+            log.event(f"SERVICO {svc.uuid} ({svc.description}){tag}")
+            for ch in svc.characteristics:
+                log.event(f"   CHAR {short_uuid(ch.uuid):<9} {ch.uuid} handle={ch.handle} props={','.join(ch.properties)}")
+                if "read" in ch.properties:
+                    try:
+                        val = bytes(await client.read_gatt_char(ch))
+                        log.data("READ", ch.uuid, val)
+                    except Exception as e:  # noqa: BLE001
+                        log.event(f"       leitura falhou: {e}")
+                for d in ch.descriptors:
+                    log.event(f"       DESC {d.uuid} handle={d.handle}")
+    print(f"\n[log] pronto. Me manda o arquivo: {log.path.resolve()}")
+
+
+# --------------------------------------------------------------------------
+# Escutar notificacoes (e opcionalmente abrir a sessao SAP)
+# --------------------------------------------------------------------------
+async def cmd_listen(args) -> None:
+    dev = await find_band(args.address)
+    log = Logger("listen_init" if args.init else "listen")
+    disconnected = asyncio.Event()
+
+    def on_disconnect(_client) -> None:
+        log.event("desconectada")
+        disconnected.set()
+
+    def on_notify(sender: BleakGATTCharacteristic, data: bytearray) -> None:
+        log.data("RX", sender.uuid, bytes(data))
+
+    async with BleakClient(dev, disconnected_callback=on_disconnect) as client:
+        log.event(f"conectado: {dev.name} {dev.address}  MTU={client.mtu_size}")
+        await maybe_pair(client, log, args.pair)
+
+        notify_chars, sap_write = [], None
+        for svc in client.services:
+            for ch in svc.characteristics:
+                props = set(ch.properties)
+                if props & {"notify", "indicate"}:
+                    notify_chars.append(ch)
+                if svc.uuid.lower() == SAP_SERVICE and props & {"write", "write-without-response"}:
+                    sap_write = ch
+
+        for ch in notify_chars:
+            try:
+                await client.start_notify(ch, on_notify)
+                log.event(f"inscrito em {short_uuid(ch.uuid)} ({','.join(ch.properties)})")
+            except Exception as e:  # noqa: BLE001
+                log.event(f"falha ao inscrever em {short_uuid(ch.uuid)}: {e}")
+
+        if sap_write:
+            log.event(f"caracteristica de escrita SAP: {short_uuid(sap_write.uuid)} ({','.join(sap_write.properties)})")
+        else:
+            log.event("nenhuma caracteristica de escrita encontrada no servico SAP")
+
+        if args.init and sap_write:
+            frame = bytes.fromhex(SESSION_OPEN_HEX)
+            if client.mtu_size - 3 < len(frame):
+                log.event(f"AVISO: frame de {len(frame)} B maior que MTU-3 ({client.mtu_size - 3}); pode falhar")
+            await asyncio.sleep(1.0)  # deixa a rajada inicial da pulseira chegar primeiro
+            log.data("TX", sap_write.uuid, frame)
+            try:
+                await client.write_gatt_char(sap_write, frame, response="write" in sap_write.properties)
+            except Exception as e:  # noqa: BLE001
+                log.event(f"escrita falhou: {e}")
+
+        log.event(f"escutando por ate {args.seconds} s (Ctrl+C para parar)")
+        try:
+            await asyncio.wait_for(disconnected.wait(), timeout=args.seconds)
+        except asyncio.TimeoutError:
+            log.event("tempo esgotado, encerrando")
+
+    print(f"\n[log] pronto. Me manda o arquivo: {log.path.resolve()}")
+
+
+# --------------------------------------------------------------------------
+def main() -> None:
+    p = argparse.ArgumentParser(description="Sniffer BLE do Galaxy Fit3")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("scan", help="procura dispositivos BLE")
+
+    for name in ("explore", "listen"):
+        sp = sub.add_parser(name)
+        sp.add_argument("--address", help="endereco BLE da pulseira")
+        sp.add_argument("--pair", action="store_true", help="pede bond ao Windows")
+        if name == "listen":
+            sp.add_argument("--init", action="store_true", help="envia o frame de abertura de sessao SAP")
+            sp.add_argument("--seconds", type=int, default=180, help="tempo de escuta (padrao 180)")
+
+    args = p.parse_args()
+    handler = {"scan": cmd_scan, "explore": cmd_explore, "listen": cmd_listen}[args.cmd]
+    try:
+        asyncio.run(handler(args))
+    except KeyboardInterrupt:
+        print("\n[ok] interrompido pelo usuario")
+
+
+if __name__ == "__main__":
+    main()

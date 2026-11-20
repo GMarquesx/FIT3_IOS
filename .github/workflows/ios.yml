@@ -1,0 +1,58 @@
+name: iOS - gerar .ipa
+
+on:
+  push:
+    paths:
+      - "ios/**"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar XcodeGen
+        run: brew install xcodegen
+
+      - name: Gerar o projeto Xcode
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Compilar (sem assinatura; o SideStore assina no iPhone)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Elo.xcodeproj \
+            -scheme Elo \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tee xcodebuild.log
+
+      - name: Empacotar .ipa
+        working-directory: ios
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/Elo.app Payload/
+          zip -qry Elo.ipa Payload
+          ls -la Elo.ipa
+
+      - name: Publicar o .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: Elo-ipa
+          path: ios/Elo.ipa
+          retention-days: 14
+
+      - name: Guardar o log de compilacao (se falhar)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: ios/xcodebuild.log

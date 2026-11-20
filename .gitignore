@@ -1,0 +1,21 @@
+# Capturas e logs: tem numero de serie da pulseira e conteudo de notificacoes
+logs/
+android/capturas/
+android/platform-tools/
+*.jsonl
+*.pklg
+btsnoop*.log
+bugreport*.zip
+
+# Python
+__pycache__/
+*.pyc
+
+# iOS (o projeto e gerado pelo XcodeGen no GitHub Actions)
+ios/build/
+ios/Payload/
+ios/*.ipa
+ios/*.xcodeproj/
+ios/xcodebuild.log
+ios/Elo/Info.plist
+.DS_Store
