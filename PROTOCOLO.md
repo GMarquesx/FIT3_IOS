@@ -79,6 +79,14 @@
   Hipótese: lista de métricas (passos, frequência, sono, SpO₂…). Próximo passo: sonda do app iOS (Console → Sonda de saúde).
 - `0A/04` e `0A/89` começam com `e0 SS SS` (mesmo contador do A2) → o canal 0A tem um sub-protocolo com número de sequência.
 
+## Canal 0x0F = mostradores (watch faces)
+- Ao conectar a pulseira manda `0F/00 01 <n> {03 <id> 02 <posição>} x n`. Ex.: 19 ids; posições 01..08 = carrossel,
+  `ff` = instalado mas fora do carrossel. Ordem vista: 17, 15, 1C, 02, 08, 06, 19, 18 (posições 1–8).
+- Comando para trocar o mostrador: em teste no app iOS (Console → Mostradores), tentativas 0F/01, 0F/02, 0F/03,
+  0F/04, 0F/81 com `03 <id>` e a lista reordenada.
+- Papel de parede com foto e complicações: ainda desconhecidos (provável transferência de arquivo; precisa de captura
+  do Galaxy Wearable no Android).
+
 ## Em aberto
 - ~~Qual mensagem conclui a configuração~~ → **01/84 01** ✅
 - Reconexão com a chave salva: a pulseira derruba em 0,1 s. Por enquanto: despear + parear a cada conexão.

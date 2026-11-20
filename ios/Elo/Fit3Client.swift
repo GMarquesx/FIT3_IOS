@@ -29,6 +29,12 @@ struct BandLanguage: Identifiable {
     let name: String
 }
 
+/// Mostrador instalado na pulseira (lista do canal 0x0F): id e posicao no carrossel (0xFF = fora).
+struct WatchFace: Identifiable, Equatable {
+    let id: UInt8
+    let slot: UInt8
+}
+
 /// Evento para o modelo 3D mostrar (mensagem ou ligacao real).
 struct LiveAlert: Equatable {
     let screen: BandScreen
@@ -62,6 +68,8 @@ final class Fit3Client: NSObject, ObservableObject {
     @Published var measuringHR = false
     @Published var lastBpm: Int?
     @Published var lastBpmDate: Date?
+    @Published var watchFaces: [WatchFace] = []
+    @Published var faceLabLog: [String] = []
     @Published var probeRunning = false
     @Published var probeIndex = 0
     @Published var probeTotal = 0
@@ -383,6 +391,54 @@ final class Fit3Client: NSObject, ObservableObject {
         log("probe stopped")
     }
 
+    // MARK: - Laboratorio de mostradores (canal 0x0F)
+
+    /// "01 <n>" + n x "03 <id> 02 <posicao>" (como a pulseira manda no 0F/00).
+    static func encodeFaceList(_ faces: [WatchFace]) -> [UInt8] {
+        var out: [UInt8] = [0x01, UInt8(faces.count)]
+        for f in faces { out += [0x03, f.id, 0x02, f.slot] }
+        return out
+    }
+
+    /// Mesma lista com o mostrador escolhido na posicao 1 e os outros empurrados.
+    func faceListWithFirst(_ id: UInt8) -> [WatchFace] {
+        let inCarousel = watchFaces.filter { $0.slot != 0xFF && $0.id != id }.sorted { $0.slot < $1.slot }
+        var ordered = [WatchFace(id: id, slot: 1)]
+        for (i, f) in inCarousel.enumerated() { ordered.append(WatchFace(id: f.id, slot: UInt8(i + 2))) }
+        let rest = watchFaces.filter { $0.slot == 0xFF && $0.id != id }
+        return ordered + rest
+    }
+
+    /// Tentativas para "usar este mostrador"; o usuario diz qual funcionou.
+    func faceAttempts(for id: UInt8) -> [(String, Data)] {
+        let list = Fit3Client.encodeFaceList(faceListWithFirst(id))
+        return [
+            ("0F/01 03 id", FrameCodec.cmd(0x0F, [0x01, 0x03, id])),
+            ("0F/01 id", FrameCodec.cmd(0x0F, [0x01, id])),
+            ("0F/02 03 id", FrameCodec.cmd(0x0F, [0x02, 0x03, id])),
+            ("0F/02 id", FrameCodec.cmd(0x0F, [0x02, id])),
+            ("0F/03 03 id", FrameCodec.cmd(0x0F, [0x03, 0x03, id])),
+            ("0F/04 03 id", FrameCodec.cmd(0x0F, [0x04, 0x03, id])),
+            ("0F/81 03 id", FrameCodec.cmd(0x0F, [0x81, 0x03, id])),
+            ("0F/01 + list", FrameCodec.cmd(0x0F, [0x01] + list)),
+            ("0F/02 + list", FrameCodec.cmd(0x0F, [0x02] + list)),
+            ("0F/40 + list", FrameCodec.cmd(0x0F, [0x40] + list)),
+        ]
+    }
+
+    func tryFace(_ id: UInt8, attempt index: Int) {
+        let attempts = faceAttempts(for: id)
+        guard sessionReady, index < attempts.count else { return }
+        if !recording { toggleRecording() }
+        let a = attempts[index]
+        send(String(format: "Face %02X · try %d · ", id, index + 1) + a.0, a.1)
+    }
+
+    func noteFaceResult(_ text: String) {
+        faceLabLog.insert("\(clock.string(from: Date()))  \(text)", at: 0)
+        log("face lab: \(text)")
+    }
+
     func toggleRecording() {
         if recording {
             recording = false
@@ -499,6 +555,15 @@ final class Fit3Client: NSObject, ObservableObject {
                 label = L("Device info")
             } else if f.channel == 0x1F {
                 label = L("Find band")
+            } else if f.channel == 0x0F && f.data.count >= 2 && f.data[0] == 0x01 {
+                var list: [WatchFace] = []
+                var i = 2
+                while i + 3 < f.data.count && f.data[i] == 0x03 && f.data[i + 2] == 0x02 {
+                    list.append(WatchFace(id: f.data[i + 1], slot: f.data[i + 3]))
+                    i += 4
+                }
+                if !list.isEmpty { watchFaces = list }
+                label = L("Watch faces (%d)", list.count)
             } else if f.channel == 0x0A && f.command == 0xA2 {
                 label = "0A/A2 (keep-alive)"
                 if autoAckA2 {

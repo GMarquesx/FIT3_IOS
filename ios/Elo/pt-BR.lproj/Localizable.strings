@@ -257,3 +257,13 @@
 "Measure heart rate" = "Medir batimentos";
 "On tap" = "Ao tocar";
 "Each reading keeps the sensor on for 30 s. Live during workouts." = "Cada leitura liga o sensor por 30 s. Ao vivo durante os treinos.";
+"Watch faces (%d)" = "Mostradores (%d)";
+"Watch faces" = "Mostradores";
+"The band sends this list when it connects (channel 0x0F). Pick a face that is NOT the current one, send each attempt and tell me if the band changed." = "A pulseira manda esta lista quando conecta (canal 0x0F). Escolha um mostrador que NÃO seja o atual, mande cada tentativa e diga se a pulseira mudou.";
+"No list yet. Disconnect and connect again to receive it." = "Ainda sem lista. Desconecte e conecte de novo para receber.";
+"off" = "fora";
+"Face %@ · attempt %d of %d" = "Mostrador %@ · tentativa %d de %d";
+"Send attempt" = "Mandar tentativa";
+"It changed!" = "Mudou!";
+"Nothing · next" = "Nada · próxima";
+"No attempt worked. Export the .jsonl and send it to me." = "Nenhuma tentativa funcionou. Exporte o .jsonl e me mande.";

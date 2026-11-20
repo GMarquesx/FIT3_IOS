@@ -205,6 +205,8 @@ struct ConsoleView: View {
             .padding(14)
             .card(radius: 16)
 
+            FaceLabView()
+
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(L("Health probe")).font(EloFont.inter(15, .semibold)).foregroundColor(EloColor.text)
