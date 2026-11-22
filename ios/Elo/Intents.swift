@@ -107,7 +107,7 @@ struct SleepModeIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let value = on
         await MainActor.run { Fit3Client.shared.sleepManual = value }
-        return .result(dialog: value ? "Sleep mode on" : "Sleep mode off")
+        return .result(dialog: value ? IntentDialog("Sleep mode on") : IntentDialog("Sleep mode off"))
     }
 }
 
@@ -120,7 +120,7 @@ struct ToggleSleepModeIntent: AppIntent {
             Fit3Client.shared.sleepManual.toggle()
             return Fit3Client.shared.sleepManual
         }
-        return .result(dialog: now ? "Sleep mode on" : "Sleep mode off")
+        return .result(dialog: now ? IntentDialog("Sleep mode on") : IntentDialog("Sleep mode off"))
     }
 }
 
