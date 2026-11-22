@@ -92,6 +92,38 @@ struct BandBatteryIntent: AppIntent {
     }
 }
 
+/// "Modo sono do Elo": liga/desliga (para usar com o Foco Sono do iPhone).
+struct SleepModeIntent: AppIntent {
+    static var title: LocalizedStringResource = "Set Elo sleep mode"
+    static var description = IntentDescription("Stops the band from vibrating while you sleep.")
+
+    @Parameter(title: "Sleep mode", default: true)
+    var on: Bool
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("Turn Elo sleep mode \(\.$on)")
+    }
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let value = on
+        await MainActor.run { Fit3Client.shared.sleepManual = value }
+        return .result(dialog: value ? "Sleep mode on" : "Sleep mode off")
+    }
+}
+
+/// Alterna o modo sono (para a Siri e a Central de Controle).
+struct ToggleSleepModeIntent: AppIntent {
+    static var title: LocalizedStringResource = "Toggle Elo sleep mode"
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        let now = await MainActor.run { () -> Bool in
+            Fit3Client.shared.sleepManual.toggle()
+            return Fit3Client.shared.sleepManual
+        }
+        return .result(dialog: now ? "Sleep mode on" : "Sleep mode off")
+    }
+}
+
 struct EloShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(intent: VibrateBandIntent(),
@@ -103,6 +135,10 @@ struct EloShortcuts: AppShortcutsProvider {
                     phrases: ["Band battery in \(.applicationName)"],
                     shortTitle: "Band battery",
                     systemImageName: "battery.75percent")
+        AppShortcut(intent: ToggleSleepModeIntent(),
+                    phrases: ["Toggle sleep mode in \(.applicationName)"],
+                    shortTitle: "Sleep mode",
+                    systemImageName: "moon.zzz")
         AppShortcut(intent: SendToBandIntent(),
                     phrases: ["Send to my band with \(.applicationName)"],
                     shortTitle: "Send to band",

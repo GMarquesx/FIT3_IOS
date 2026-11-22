@@ -267,3 +267,17 @@
 "It changed!" = "Mudou!";
 "Nothing · next" = "Nada · próxima";
 "No attempt worked. Export the .jsonl and send it to me." = "Nenhuma tentativa funcionou. Exporte o .jsonl e me mande.";
+"Sleep mode" = "Modo sono";
+"On · the band won't vibrate" = "Ligado · a pulseira não vai vibrar";
+"The band won't vibrate while you sleep" = "A pulseira não vibra enquanto você dorme";
+"Every night" = "Todas as noites";
+"Until" = "Até";
+"Also hold alerts" = "Segurar os avisos também";
+"Nothing reaches the band, so the screen stays off" = "Nada chega à pulseira, então a tela não acende";
+"Tip: in Shortcuts › Automation › Sleep, add “Set Elo sleep mode” so it follows the iPhone Sleep Focus." = "Dica: em Atalhos › Automação › Sono, adicione \"Modo sono do Elo\" para seguir o Foco Sono do iPhone.";
+"Set Elo sleep mode" = "Modo sono do Elo";
+"Stops the band from vibrating while you sleep." = "Faz a pulseira parar de vibrar enquanto você dorme.";
+"Turn Elo sleep mode ${on}" = "Modo sono do Elo: ${on}";
+"Sleep mode on" = "Modo sono ligado";
+"Sleep mode off" = "Modo sono desligado";
+"Toggle Elo sleep mode" = "Alternar modo sono do Elo";

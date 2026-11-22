@@ -62,7 +62,8 @@ struct TodayView: View {
     private var statusText: String {
         if band.sessionReady {
             let pct = band.battery.map { "\($0)%" } ?? "—"
-            return "\(pct) · \(EloFormat.relative(band.lastContact))"
+            let base = "\(pct) · \(EloFormat.relative(band.lastContact))"
+            return band.isSleeping ? "🌙 " + L("Sleep mode") + " · " + base : base
         }
         if band.connecting || band.connected { return band.status }
         return L("Disconnected · tap ↻")

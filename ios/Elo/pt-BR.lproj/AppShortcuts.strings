@@ -2,3 +2,4 @@
 "Vibrate my band with ${applicationName}" = "Vibrar minha pulseira com o ${applicationName}";
 "Band battery in ${applicationName}" = "Bateria da pulseira no ${applicationName}";
 "Send to my band with ${applicationName}" = "Enviar para minha pulseira com o ${applicationName}";
+"Toggle sleep mode in ${applicationName}" = "Alternar modo sono no ${applicationName}";

@@ -57,6 +57,8 @@ struct AlertsView: View {
             onBandSection
             repliesSection
 
+            SleepModeCard()
+
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -135,7 +137,7 @@ struct AlertsView: View {
                                     Text(item.from).font(EloFont.inter(14, .semibold)).foregroundColor(EloColor.text)
                                         .lineLimit(1)
                                     Spacer(minLength: 8)
-                                    Text("\(item.app) · \(timeLabel(item.date))")
+                                    Text((item.held == true ? "🌙 " : "") + "\(item.app) · \(timeLabel(item.date))")
                                         .font(EloFont.inter(12)).foregroundColor(EloColor.secondary).lineLimit(1)
                                 }
                                 Text(item.text).font(EloFont.inter(13)).foregroundColor(Color(hex: 0xB4BCC8)).lineLimit(1)
@@ -429,5 +431,84 @@ struct ShortcutSetupSheet: View {
             EloIcon(paths: icon, size: 18, lineWidth: 2, color: EloColor.accent)
             Text(text).font(EloFont.inter(13)).foregroundColor(EloColor.secondary)
         }
+    }
+}
+
+/// Modo sono: sem vibracao (e, se quiser, sem avisos na pulseira).
+struct SleepModeCard: View {
+    @ObservedObject private var band = Fit3Client.shared
+
+    private func timeBinding(_ get: @escaping () -> Int, _ set: @escaping (Int) -> Void) -> Binding<Date> {
+        Binding(
+            get: {
+                let m = get()
+                return Calendar.current.date(bySettingHour: m / 60, minute: m % 60, second: 0, of: Date()) ?? Date()
+            },
+            set: { date in
+                let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+                set((c.hour ?? 0) * 60 + (c.minute ?? 0))
+            })
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color(hex: 0x231C3A))
+                    EloIcon(paths: Icons.moon, size: 17, lineWidth: 2, color: Color(hex: 0xA78BFA), fillOpacity: 0.25)
+                }
+                .frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Sleep mode")).font(EloFont.inter(15, .medium)).foregroundColor(EloColor.text)
+                    Text(band.isSleeping ? L("On · the band won't vibrate") : L("The band won't vibrate while you sleep"))
+                        .font(EloFont.inter(12))
+                        .foregroundColor(band.isSleeping ? Color(hex: 0xA78BFA) : EloColor.secondary)
+                }
+                Spacer(minLength: 0)
+                EloToggle(isOn: Binding(get: { band.sleepManual }, set: { band.sleepManual = $0 }))
+            }
+
+            Rectangle().fill(EloColor.border).frame(height: 1)
+
+            HStack {
+                Text(L("Every night")).font(EloFont.inter(14, .medium)).foregroundColor(EloColor.text)
+                Spacer()
+                EloToggle(isOn: Binding(get: { band.sleepScheduled }, set: { band.sleepScheduled = $0 }))
+            }
+            if band.sleepScheduled {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L("From")).font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
+                        DatePicker("", selection: timeBinding({ band.sleepStart }, { band.sleepStart = $0 }),
+                                   displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L("Until")).font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
+                        DatePicker("", selection: timeBinding({ band.sleepEnd }, { band.sleepEnd = $0 }),
+                                   displayedComponents: .hourAndMinute)
+                            .labelsHidden()
+                    }
+                    Spacer()
+                }
+            }
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("Also hold alerts")).font(EloFont.inter(14, .medium)).foregroundColor(EloColor.text)
+                    Text(L("Nothing reaches the band, so the screen stays off"))
+                        .font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
+                }
+                Spacer(minLength: 0)
+                EloToggle(isOn: Binding(get: { band.sleepHoldAlerts }, set: { band.sleepHoldAlerts = $0 }))
+            }
+
+            Text(L("Tip: in Shortcuts › Automation › Sleep, add “Set Elo sleep mode” so it follows the iPhone Sleep Focus."))
+                .font(EloFont.inter(12)).foregroundColor(EloColor.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .card(radius: 16)
     }
 }

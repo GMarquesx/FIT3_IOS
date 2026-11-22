@@ -21,6 +21,7 @@ struct SentNotification: Identifiable, Codable, Equatable {
     let app: String
     let text: String
     let date: Date
+    var held: Bool? = nil
 }
 
 /// Idioma da pulseira (id do canal 0B).
@@ -105,6 +106,40 @@ final class Fit3Client: NSObject, ObservableObject {
     private var hrStopWork: DispatchWorkItem?
     private var hrHolds = 0
     private var inForeground = true
+
+    // MARK: Modo sono (sem vibracao; opcionalmente segura os avisos)
+
+    var sleepManual: Bool {
+        get { UserDefaults.standard.bool(forKey: "sleepManual") }
+        set { UserDefaults.standard.set(newValue, forKey: "sleepManual"); objectWillChange.send() }
+    }
+    var sleepScheduled: Bool {
+        get { UserDefaults.standard.bool(forKey: "sleepScheduled") }
+        set { UserDefaults.standard.set(newValue, forKey: "sleepScheduled"); objectWillChange.send() }
+    }
+    /// Minutos desde a meia-noite.
+    var sleepStart: Int {
+        get { UserDefaults.standard.object(forKey: "sleepStart") as? Int ?? 23 * 60 }
+        set { UserDefaults.standard.set(newValue, forKey: "sleepStart"); objectWillChange.send() }
+    }
+    var sleepEnd: Int {
+        get { UserDefaults.standard.object(forKey: "sleepEnd") as? Int ?? 7 * 60 }
+        set { UserDefaults.standard.set(newValue, forKey: "sleepEnd"); objectWillChange.send() }
+    }
+    var sleepHoldAlerts: Bool {
+        get { UserDefaults.standard.bool(forKey: "sleepHoldAlerts") }
+        set { UserDefaults.standard.set(newValue, forKey: "sleepHoldAlerts"); objectWillChange.send() }
+    }
+
+    var isSleeping: Bool {
+        if sleepManual { return true }
+        guard sleepScheduled else { return false }
+        let c = Calendar.current.dateComponents([.hour, .minute], from: Date())
+        let now = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+        if sleepStart == sleepEnd { return false }
+        if sleepStart < sleepEnd { return now >= sleepStart && now < sleepEnd }
+        return now >= sleepStart || now < sleepEnd
+    }
 
     /// Intervalo da medicao automatica de batimentos, em minutos (0 = so quando pedir).
     var hrInterval: Int {
@@ -302,7 +337,14 @@ final class Fit3Client: NSObject, ObservableObject {
         notificationCounter += 1
         let frame = Fit3Protocol.notification(from: sender, text: text, app: app, id: notificationCounter)
         let label = L("Notification from %@", sender)
-        if vibrateOnArrival && Date().timeIntervalSince(lastBuzz) >= Double(vibrationCooldown) {
+        let sleeping = isSleeping
+        if sleeping && sleepHoldAlerts {
+            // Modo sono segurando avisos: nao vai para a pulseira, so fica na lista.
+            log("sleep mode: held alert from \(sender)")
+            remember(SentNotification(from: sender, app: app, text: text, date: Date(), held: true))
+            return
+        }
+        if vibrateOnArrival && !sleeping && Date().timeIntervalSince(lastBuzz) >= Double(vibrationCooldown) {
             // Vibra antes (achar pulseira por ~0,7 s) e manda a notificacao por cima.
             lastBuzz = Date()
             send(L("Buzz"), Fit3Protocol.findOn)
@@ -313,21 +355,25 @@ final class Fit3Client: NSObject, ObservableObject {
         } else {
             send(label, frame)
         }
-        let item = SentNotification(from: sender, app: app, text: text, date: Date())
+        remember(SentNotification(from: sender, app: app, text: text, date: Date()))
+        liveAlert = LiveAlert(screen: .message(app: app, from: sender, text: text), date: Date())
+    }
+
+    private func remember(_ item: SentNotification) {
         history.insert(item, at: 0)
         if history.count > 30 { history.removeLast(history.count - 30) }
         if let data = try? JSONEncoder().encode(history) {
             UserDefaults.standard.set(data, forKey: "sentHistory")
         }
-        liveAlert = LiveAlert(screen: .message(app: app, from: sender, text: text), date: Date())
     }
 
     func sendCall(from caller: String, buzz: Bool) {
         notificationCounter += 1
         let frame = Fit3Protocol.notification(from: caller, text: L("Calling…"), app: L("Phone"),
                                               id: notificationCounter)
+        if isSleeping && sleepHoldAlerts { return }
         send(L("Call from %@", caller), frame)
-        if buzz { vibrate() }
+        if buzz && !isSleeping { vibrate() }
         liveAlert = LiveAlert(screen: .call(name: caller), date: Date())
     }
 
