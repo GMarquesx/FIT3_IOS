@@ -119,6 +119,24 @@ O canal é o `serviceId` do SAP. Isso corrige os palpites anteriores: **0x0F sã
   widgets do carrossel. Ordem original: 17, 15, 1C, 02, 08, 06, 19, 18.
 - Canal 0x18 (apps) grava com `01 02 01 03 <n> {00 <app> 01 <ordem>}`.
 
+## Canal 0x09 = música (SMedia, `providers/samusic`)
+Byte 0 = formato (0x80) | resposta (0x40) | msgId; formato 1 traz o nº de parâmetros no byte 1. Texto = id + tamanho 1B + UTF-8
+(até 99 caracteres). Inteiros LE: `int` 4B, `long` 8B.
+
+| Pulseira → celular | Bytes | Resposta |
+|---|---|---|
+| 01 quer atualizações | `01 01 <0 não / 1 sim / 2 AOD>` | `57 01 01 <v>`, depois 17 e 18 a cada mudança |
+| 02 metadados | `02` | `D1 05 01 <duração ms 8B> 02 título 03 artista 04 arquivo da capa 05 appId` |
+| 03 estado | `03` | `D2 04 01 <03 tocando / 02 pausado> 02 <posição ms 8B> 04 <item 8B> 03 appId` |
+| 04 botão | `04 01 <1 stop, 2 play/pause, 3 anterior, 4 próxima> 02 <2 apertou / 1 soltou>` | — |
+| 05 capacidade | `05` | `54 02 01 <volume máx 4B> 02 <aviso 4B>` |
+| 06 volume | `06` | `55 02 01 <volume 4B> 02 <fone 2 / sem 1>` |
+| 07 controle de volume | `07 01 <1 definir, 2 +, 3 −, 4/5 mudo> 02 <valor>` | — |
+| 08 info do app | `08 <appId>` | `D6 03 01 appId 02 título 03 ícone` |
+| 09 fila | `09 <appId>` | `E0 03 01 appId 02 título 03 <qtd 4B>` |
+
+Capa e ícone vão por transferência de arquivo (256×402 PNG), ainda não feito.
+
 ## Canal 0x0A = saúde (HealthService)
 Cabeçalho de 1 byte: bit7 frameType, bit6 0 pedido / 1 resposta, bits 0–5 msgId. Inteiros little endian.
 

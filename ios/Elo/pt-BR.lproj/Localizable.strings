@@ -346,3 +346,28 @@
 "Connect to Apple Health" = "Conectar ao app Saúde";
 "Last write failed: %@" = "A última gravação falhou: %@";
 "Writing %d of 5 types · %d samples saved" = "Gravando %d de 5 tipos · %d amostras salvas";
+
+/* v0.3: musica (canal 0x09) */
+"Music: updates" = "Música: atualizações";
+"Music: band wants updates (%d)" = "Música: pulseira quer atualizações (%d)";
+"Music: metadata request" = "Música: pedido de faixa";
+"Music: state request" = "Música: pedido de estado";
+"Music: button %@" = "Música: botão %@";
+"Music: capability" = "Música: capacidade";
+"Music: capability request" = "Música: pedido de capacidade";
+"Music: volume request" = "Música: pedido de volume";
+"Music: volume control (%d)" = "Música: controle de volume (%d)";
+"Music: app info" = "Música: info do app";
+"Music: app info request" = "Música: pedido de info do app";
+"Music: queue" = "Música: fila";
+"Music: queue request" = "Música: pedido de fila";
+"Music: now playing" = "Música: tocando agora";
+"Music: state" = "Música: estado";
+"Music: volume" = "Música: volume";
+"Music on the band" = "Música na pulseira";
+"Song, play/pause and skip from the band's music screen" = "Faixa, play/pause e pular pela tela de música da pulseira";
+"Allow Apple Music access" = "Permitir acesso ao Apple Music";
+"Nothing playing" = "Nada tocando";
+"Band music screen connected" = "Tela de música da pulseira conectada";
+"Open the music widget on the band" = "Abra o widget de música na pulseira";
+"Works with the Music app (Apple Music). iOS doesn't let other apps control Spotify or YouTube Music." = "Funciona com o app Música (Apple Music). O iOS não deixa outros apps controlarem Spotify ou YouTube Music.";

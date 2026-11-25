@@ -59,6 +59,8 @@ struct AlertsView: View {
 
             SleepModeCard()
 
+            MusicCard()
+
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 2) {

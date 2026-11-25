@@ -42,6 +42,7 @@ targets:
         NSLocationWhenInUseUsageDescription: "Elo uses GPS to measure the distance and pace of your runs."
         NSLocationAlwaysAndWhenInUseUsageDescription: "Elo keeps recording your run while the screen is off."
         NSHealthUpdateUsageDescription: "Elo saves the steps, heart rate, blood oxygen and energy measured by your Galaxy Fit3 to the Health app."
+        NSAppleMusicUsageDescription: "Elo shows the song playing in Apple Music on your Galaxy Fit3 and lets the band control it."
         NSHealthShareUsageDescription: "Elo reads Health data only to avoid saving the same sample twice."
     entitlements:
       path: Elo/Elo.entitlements

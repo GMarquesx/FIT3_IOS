@@ -208,6 +208,9 @@ final class Fit3Client: NSObject, ObservableObject {
             history = list
         }
         loadTodayActivity()
+        MusicBridge.shared.send = { [weak self] label, msg in
+            self?.send(label, FrameCodec.cmd(0x09, msg))
+        }
         central = CBCentralManager(delegate: self, queue: .main,
                                    options: [CBCentralManagerOptionRestoreIdentifierKey: "elo.central"])
         let nc = NotificationCenter.default
@@ -839,6 +842,8 @@ final class Fit3Client: NSObject, ObservableObject {
                 label = handleHealth([f.command] + f.data)
             } else if f.channel == 0x06 {
                 label = handleFaces([f.command] + f.data)
+            } else if f.channel == 0x09 {
+                label = MusicBridge.shared.handle([f.command] + f.data)
             } else if f.channel == 0x18 {
                 label = L("Apps list")
             }
@@ -868,6 +873,7 @@ final class Fit3Client: NSObject, ObservableObject {
 
     private func resetLink() {
         hrStopWork?.cancel()
+        MusicBridge.shared.bandDisconnected()
         rxBuffer.removeAll()
         largeData.reset()
         healthHandshake = false

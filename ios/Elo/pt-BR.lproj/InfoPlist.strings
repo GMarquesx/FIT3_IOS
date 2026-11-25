@@ -3,3 +3,4 @@
 "NSLocationAlwaysAndWhenInUseUsageDescription" = "O Elo continua gravando a corrida com a tela apagada.";
 "NSHealthUpdateUsageDescription" = "O Elo salva no app Saúde os passos, batimentos, oxigênio e energia medidos pela sua Galaxy Fit3.";
 "NSHealthShareUsageDescription" = "O Elo só lê o app Saúde para não salvar a mesma amostra duas vezes.";
+"NSAppleMusicUsageDescription" = "O Elo mostra na sua Galaxy Fit3 a música que está tocando no Apple Music e deixa a pulseira controlá-la.";
