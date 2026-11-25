@@ -88,6 +88,93 @@ enum HealthProto {
         return (out, seq, ver)
     }
 
+    /// Capacidade de saude da pulseira (0xA0, msgId 32), repetida a cada ~20 s ate ser respondida.
+    /// Blocos: tag + valor; tamanhos tirados de parseCapaStringToByte / parseCapabilityByte do plugin.
+    struct BandCapability {
+        var blocks: [UInt8: [UInt8]] = [:]   // tag -> bytes do valor (sem a tag)
+        var order: [UInt8] = []
+        var bluetoothName: String?
+        var modelName: String?
+        var modelNumber: String?
+        var protocolBytes: [UInt8]?
+        var wearableMessage: [UInt8]?
+    }
+
+    private static let fixedSize: [UInt8: Int] = [
+        0xE0: 2, 0xA0: 1, 0xA1: 2, 0xA2: 4, 0xA6: 6, 0xA7: 2, 0xAA: 3, 0xAB: 1, 0xAC: 1, 0xAD: 2,
+        0xAE: 4, 0xAF: 2, 0xB1: 1, 0xC0: 1, 0xC1: 1, 0xC2: 1,
+    ]
+    private static let lengthPrefixed: Set<UInt8> = [0xA3, 0xA4, 0xA5, 0xA8, 0xA9, 0xB2, 0xB3]
+
+    static func parseBandCapability(_ msg: [UInt8]) -> BandCapability {
+        var c = BandCapability()
+        var i = 2
+        var n = msg.count > 1 ? Int(msg[1]) : 0
+        while n > 0 && i < msg.count {
+            n -= 1
+            let tag = msg[i]
+            i += 1
+            var value: [UInt8]
+            if let size = fixedSize[tag] {
+                guard i + size <= msg.count else { break }
+                value = Array(msg[i..<(i + size)])
+                i += size
+            } else if lengthPrefixed.contains(tag) {
+                guard i < msg.count else { break }
+                let len = Int(msg[i])
+                guard i + 1 + len <= msg.count else { break }
+                value = Array(msg[i..<(i + 1 + len)])   // mantem o byte de tamanho
+                i += 1 + len
+            } else {
+                break
+            }
+            c.blocks[tag] = value
+            c.order.append(tag)
+        }
+        func text(_ tag: UInt8) -> String? {
+            guard let v = c.blocks[tag], v.count > 1 else { return nil }
+            return String(decoding: v.dropFirst(), as: UTF8.self)
+        }
+        c.bluetoothName = text(0xA3)
+        c.modelName = text(0xA4)
+        c.modelNumber = text(0xA5)
+        c.protocolBytes = c.blocks[0xA1]
+        // C3 (mensagem do relogio) fica no fim: procura "C2 00 C3" e pega os 10 bytes seguintes.
+        if msg.count > 13 {
+            for k in stride(from: msg.count - 13, through: 2, by: -1)
+            where msg[k] == 0xC2 && msg[k + 2] == 0xC3 {
+                c.wearableMessage = Array(msg[(k + 3)..<(k + 13)])
+                break
+            }
+        }
+        return c
+    }
+
+    /// Resposta como o Samsung Health daria: E0 <n> A1 versao, C0 02 (resposta), C1 00 (de: shealth),
+    /// A0 01 (sincroniza), C2 02 (para: relogio), A2 versao do S Health, e repete os blocos de
+    /// recursos (A9), binning (AE), protocolo (AF), endereco (B1) e mensagem (C3) que a pulseira mandou.
+    static func capabilityResponse(to cap: BandCapability) -> [UInt8] {
+        var out: [UInt8] = [0xE0]
+        var count = 0
+        func add(_ tag: UInt8, _ value: [UInt8]) {
+            out.append(tag)
+            out += value
+            count += 1
+        }
+        add(0xA1, cap.protocolBytes ?? [0x04, 0x33])
+        add(0xC0, [0x02])
+        add(0xC1, [0x00])
+        add(0xA0, [0x01])
+        add(0xC2, [0x02])
+        add(0xA2, le32(sHealthVersion))
+        for tag: UInt8 in [0xA9, 0xAE, 0xAF, 0xB1] {
+            if let v = cap.blocks[tag] { add(tag, v) }
+        }
+        if let w = cap.wearableMessage { add(0xC3, w) }
+        out.insert(UInt8(count), at: 1)
+        return out
+    }
+
     /// Pedido de capacidade de saude, mandado logo depois da resposta acima.
     static let healthCapabilityRequest: [UInt8] = [0x34]
 

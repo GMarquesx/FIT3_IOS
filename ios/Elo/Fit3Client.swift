@@ -83,6 +83,7 @@ final class Fit3Client: NSObject, ObservableObject {
     @Published var lastSpO2Date: Date?
     @Published var heartHistory: [HeartSample] = []
     @Published var healthHandshake = false
+    @Published var healthCapabilityDone = false
     @Published var healthLog: [String] = []
 
     static let sapService = CBUUID(string: "1A1A")
@@ -111,6 +112,8 @@ final class Fit3Client: NSObject, ObservableObject {
     private var notificationCounter = Int(Date().timeIntervalSince1970) % 100000
     private var rssiTimer: Timer?
     private var rxBuffer: [UInt8] = []
+    private var fragChannel: UInt8?
+    private var fragBody: [UInt8] = []
     private var liveHR: [Int] = []
     private var liveHRStart: Date?
     private var rxBufferDate = Date.distantPast
@@ -468,9 +471,19 @@ final class Fit3Client: NSObject, ObservableObject {
             let names = result.types.map { HealthSyncParser.name($0) }.joined(separator: ", ")
             healthNote("sync \(msg.count) B: \(names)" + (result.stoppedAt.map { " · stopped at " + HealthSyncParser.name($0) } ?? ""))
             return L("Health sync (%d B)", msg.count)
+        case (false, 32):
+            let cap = HealthProto.parseBandCapability(msg)
+            guard healthSyncEnabled else { return L("Band health capability") }
+            let reply = HealthProto.capabilityResponse(to: cap)
+            sendHealth(L("Health capability reply"), reply)
+            if !healthCapabilityDone {
+                healthCapabilityDone = true
+                healthNote("capability: \(cap.modelName ?? "?") \(cap.modelNumber ?? "") · \(cap.order.count) blocks · reply \(reply.count) B")
+            }
+            return L("Band health capability")
         case (true, HealthProto.MsgId.gmCapabilityNoti):
             return L("Health capability OK")
-        case (_, 32), (_, 33):
+        case (_, 33):
             healthNote("band capability \(msg.count) B")
             return L("Band health capability")
         case (_, HealthProto.MsgId.wearableMsg):
@@ -813,6 +826,27 @@ final class Fit3Client: NSObject, ObservableObject {
             log("RX ?? \(FrameCodec.hex([UInt8](value.prefix(24))))")
             addFrame(dir: "RX", data: value, label: L("Invalid CRC"), error: true)
         case .frame(let f):
+            handleFrame(f, raw: value)
+        case .fragment(let first, let last, let channel, let body):
+            if first {
+                fragChannel = channel
+                fragBody = body
+            } else if fragChannel != nil {
+                fragBody += body
+            }
+            addFrame(dir: "RX", data: value,
+                     label: last ? L("Part (last)") : L("Part (%d B)", body.count), error: fragChannel == nil)
+            if last, let ch = fragChannel, !fragBody.isEmpty {
+                let f = FrameCodec.Frame(fromBand: true, channel: ch, command: fragBody[0], data: Array(fragBody.dropFirst()))
+                fragChannel = nil
+                fragBody = []
+                handleFrame(f, raw: Data([ch, ch] + [f.command] + f.data))
+            }
+        }
+    }
+
+    private func handleFrame(_ f: FrameCodec.Frame, raw value: Data) {
+        do {
             let ch = String(format: "%02X", f.channel)
             let cm = String(format: "%02X", f.command)
             log("RX ch \(ch) cmd \(cm) \(FrameCodec.hex(Array(f.data.prefix(16))))")
@@ -875,8 +909,11 @@ final class Fit3Client: NSObject, ObservableObject {
         hrStopWork?.cancel()
         MusicBridge.shared.bandDisconnected()
         rxBuffer.removeAll()
+        fragChannel = nil
+        fragBody = []
         largeData.reset()
         healthHandshake = false
+        healthCapabilityDone = false
         measuringHR = false
         hrContact = false
         connected = false

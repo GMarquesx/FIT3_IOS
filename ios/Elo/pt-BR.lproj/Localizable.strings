@@ -393,3 +393,8 @@
 "Active kilocalories since the last time this ran." = "Quilocalorias ativas desde a última execução.";
 "The latest heart rate from the band, or 0 if there is no new reading." = "O último batimento da pulseira, ou 0 se não houver leitura nova.";
 "The latest SpO2 percentage from the band, or 0 if there is no new reading." = "A última porcentagem de SpO2 da pulseira, ou 0 se não houver leitura nova.";
+
+/* v0.3: fragmentos SAP e capacidade de saude */
+"Part (last)" = "Parte (última)";
+"Part (%d B)" = "Parte (%d B)";
+"Health capability reply" = "Resposta de capacidade de saúde";

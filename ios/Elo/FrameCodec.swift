@@ -53,6 +53,9 @@ enum FrameCodec {
         case handshake
         case ack
         case frame(Frame)
+        /// Pedaco de mensagem SAP grande. Byte0 do payload: bit1 = fragmentado, bit2 = ultimo pedaco;
+        /// byte1 bits0-5 = indice do pedaco. So o primeiro traz o canal (bytes 2-3).
+        case fragment(first: Bool, last: Bool, channel: UInt8?, body: [UInt8])
         case invalid
     }
 
@@ -71,6 +74,15 @@ enum FrameCodec {
         guard crc == crc16ARC(payload) else { return .invalid }
         if payload.count == 4 && payload[0] == 0x88 {
             return .ack
+        }
+        if payload.count >= 3 && payload[0] & 0x02 != 0 {
+            let first = payload[1] & 0x3F == 0
+            let last = payload[0] & 0x04 != 0
+            if first {
+                guard payload.count >= 5, payload[2] == payload[3] else { return .invalid }
+                return .fragment(first: true, last: last, channel: payload[2], body: Array(payload[4...]))
+            }
+            return .fragment(first: false, last: last, channel: nil, body: Array(payload[2...]))
         }
         guard payload.count >= 5, payload[0] <= 1, payload[2] == payload[3] else { return .invalid }
         let frame = Frame(fromBand: payload[0] == 0,

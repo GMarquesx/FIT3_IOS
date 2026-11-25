@@ -93,7 +93,7 @@ final class MusicBridge: NSObject, ObservableObject {
         case 1:
             let wanted = param(msg, 1) ?? 1
             bandListening = wanted != 0
-            let flag: UInt8 = wanted == 0 ? 0 : 1
+            let flag: UInt8 = min(wanted, 2)   // 0 nao, 1 sim, 2 tela sempre ligada (AOD): ecoa o pedido
             out(L("Music: updates"), [0x57, 0x01, 0x01, flag])
             if bandListening {
                 startObserving()
