@@ -374,3 +374,22 @@
 "The permission request was refused." = "O pedido de permissão foi recusado.";
 "The installed copy of Elo was signed without HealthKit permission, so iOS won't show the request. The signer (iloader/SideStore) removed it." = "A cópia instalada do Elo foi assinada sem a permissão do HealthKit, então o iOS não mostra o pedido. O assinador (iloader/SideStore) removeu.";
 "Error: %@" = "Erro: %@";
+
+/* v0.3: Saude pelo Atalhos (plano B) */
+"Save to Health with Shortcuts" = "Salvar no Saúde pelo Atalhos";
+"Without HealthKit, Elo hands the numbers to a shortcut that saves them. Create it once:" = "Sem o HealthKit, o Elo passa os números para um atalho que salva no Saúde. Crie uma vez:";
+"Send to Health now" = "Enviar ao Saúde agora";
+"New shortcut named \"Elo Health\"." = "Novo atalho chamado \"Elo Health\".";
+"Add Elo's \"New steps for Health\", then \"If\" result is greater than 0 → \"Log Health Sample\" Steps with the result." = "Adicione \"Novos passos para o Saúde\" do Elo, depois \"Se\" o resultado for maior que 0 → \"Registrar Amostra de Saúde\" Passos com o resultado.";
+"Repeat for distance (Walking + Running Distance, km), active energy (kcal), heart rate (count/min) and blood oxygen (%)." = "Repita para distância (Distância de Caminhada + Corrida, km), energia ativa (kcal), batimentos (bpm) e oxigênio no sangue (%).";
+"Automation: \"When Elo is closed\" and a few times a day → run \"Elo Health\", without asking." = "Automação: \"Quando o Elo for fechado\" e algumas vezes por dia → executar \"Elo Health\", sem perguntar.";
+"New steps for Health" = "Novos passos para o Saúde";
+"New distance for Health" = "Nova distância para o Saúde";
+"New active energy for Health" = "Nova energia ativa para o Saúde";
+"New heart rate for Health" = "Novo batimento para o Saúde";
+"New blood oxygen for Health" = "Novo oxigênio para o Saúde";
+"Steps counted by the Galaxy Fit3 since the last time this ran. Use with Log Health Sample." = "Passos contados pela Galaxy Fit3 desde a última execução. Use com Registrar Amostra de Saúde.";
+"Walking and running distance in kilometers since the last time this ran." = "Distância de caminhada e corrida em km desde a última execução.";
+"Active kilocalories since the last time this ran." = "Quilocalorias ativas desde a última execução.";
+"The latest heart rate from the band, or 0 if there is no new reading." = "O último batimento da pulseira, ou 0 se não houver leitura nova.";
+"The latest SpO2 percentage from the band, or 0 if there is no new reading." = "A última porcentagem de SpO2 da pulseira, ou 0 se não houver leitura nova.";

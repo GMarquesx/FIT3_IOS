@@ -79,8 +79,48 @@ struct HealthView: View {
         return L("last %d%%", v)
     }
 
+    /// Cartao do plano B (Atalhos), quando a assinatura nao trouxe o HealthKit.
+    private var shortcutsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(L("Save to Health with Shortcuts")).font(EloFont.inter(15, .semibold)).foregroundColor(EloColor.text)
+            Text(L("Without HealthKit, Elo hands the numbers to a shortcut that saves them. Create it once:"))
+                .font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(Array(shortcutSteps.enumerated()), id: \.offset) { i, step in
+                HStack(alignment: .top, spacing: 8) {
+                    Text("\(i + 1)").font(EloFont.mono(11)).foregroundColor(EloColor.accent).frame(width: 14)
+                    Text(step).font(EloFont.inter(12)).foregroundColor(EloColor.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            HStack(spacing: 10) {
+                Button(L("Open Shortcuts")) {
+                    if let url = URL(string: "shortcuts://") { UIApplication.shared.open(url) }
+                }
+                .buttonStyle(EloButtonStyle(filled: false, height: 42, fontSize: 14))
+                Button(L("Send to Health now")) {
+                    if let url = URL(string: "shortcuts://run-shortcut?name=Elo%20Health") { UIApplication.shared.open(url) }
+                }
+                .buttonStyle(EloButtonStyle(height: 42, fontSize: 14))
+            }
+        }
+        .padding(14)
+        .card(radius: 14)
+    }
+
+    private var shortcutSteps: [String] {
+        [
+            L("New shortcut named \"Elo Health\"."),
+            L("Add Elo's \"New steps for Health\", then \"If\" result is greater than 0 → \"Log Health Sample\" Steps with the result."),
+            L("Repeat for distance (Walking + Running Distance, km), active energy (kcal), heart rate (count/min) and blood oxygen (%)."),
+            L("Automation: \"When Elo is closed\" and a few times a day → run \"Elo Health\", without asking."),
+        ]
+    }
+
     @ViewBuilder private var statusCard: some View {
-        if !hk.available {
+        if hk.profileHasHealthKit == false {
+            shortcutsCard
+        } else if !hk.available {
             banner(L("Apple Health isn't available on this device."), warn: true)
         } else if !hk.requested || hk.allowedCount == 0 {
             VStack(alignment: .leading, spacing: 10) {
