@@ -111,8 +111,13 @@ O canal é o `serviceId` do SAP. Isso corrige os palpites anteriores: **0x0F sã
 - `SET_CURRENT_ORDER` = `0A 19 <tipo> [qtd] {04 id 1D sampler}…`.
 - Foto de fundo e complicações: `ADD_IMAGE_LIST` / `SET_EDIT_INFO` + transferência de arquivo (`safiletransfer`). Em aberto.
 
-## Canal 0x0F = widgets
-- Ao conectar a pulseira manda `0F/00 01 <n> {03 <id> 02 <posição>} x n` (`ff` = fora do carrossel).
+## Canal 0x0F = widgets (WidgetsService)
+- Pedido: `0F/00`. Resposta (e envio espontâneo ao conectar): `0F/00 01 <n> {03 <id> 02 <posição>} x n`
+  (`ff` = instalado, fora do carrossel).
+- **Gravar**: `0F/01 01 <n> {03 <id> 02 <posição>} x n`, em ordem de id (SAMessageDataPacketConstructor).
+  As tentativas antigas do "laboratório de mostradores" (`0F/01 03 id`, `0F/01 + lista`) usaram esse comando e tiraram
+  widgets do carrossel. Ordem original: 17, 15, 1C, 02, 08, 06, 19, 18.
+- Canal 0x18 (apps) grava com `01 02 01 03 <n> {00 <app> 01 <ordem>}`.
 
 ## Canal 0x0A = saúde (HealthService)
 Cabeçalho de 1 byte: bit7 frameType, bit6 0 pedido / 1 resposta, bits 0–5 msgId. Inteiros little endian.
@@ -143,7 +148,15 @@ Cabeçalho de 1 byte: bit7 frameType, bit6 0 pedido / 1 resposta, bits 0–5 msg
   - Tipos antigos (07–1D): lista `[continua 0/1]{tag valor} x N campos`. Passos (07) = 12 campos:
     01 início, 02 fim, 03 fuso, 05 atualização (4B, segundos), 10 passos, 11 distância (float), 12 velocidade,
     13 calorias, 14 corrida, 15 caminhada, 16 duração (4B), 17 versão (1B), 75 uuid (16B).
-  - Tipos novos (≥ 0x70): `[continua 0/1][tamanho 4B][corpo]`. Resumo do dia (7E): 2C dia, 31 passos, 32 calorias,
+  - Tipos com número fixo de campos (FrameFieldCount): 07 (12), 08 (6), 09 (5), 0E (6), 0F (7), 11 (8), 15 (6), 16 (6),
+    17 (7), 18 (3), 1C/1D (4), 7C/7D (5), 8A/8C (8), 8D (7), 94 (6), 9D–9F/A1 (5).
+  - Os outros (0A frequência, 10/12 sono, 13/14 estresse, 0C/0D/1B exercício, 70+ …) usam tamanho:
+    `[continua 0/1][tamanho 4B][corpo]`.
+  - Frequência (0A): 01 início (4B), 20 bpm, 21 mín, 22 máx, 23 batidas (1B), 24 binning (tamanho 4B, 4B por minuto:
+    minuto, bpm, mín, máx), 25 tag (2B).
+  - SpO₂ (70): 01 início, A9 SpO₂, AA bpm, AB mín, AC máx (1B), AD (2B), AE (4B), AF binning (11B cada), 75 uuid.
+  - Calorias (17): 70 dia, 71 ativas, 72 repouso, 73 TEF (float), 74 tempo ativo.
+  - Tipos novos (≥ 0x70) do resumo do dia: `[continua 0/1][tamanho 4B][corpo]`. Resumo do dia (7E): 2C dia, 31 passos, 32 calorias,
     33 distância, 34 meta (4B cada), 40/41/42 listas com tamanho.
 
 ## Em aberto

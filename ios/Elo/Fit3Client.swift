@@ -78,6 +78,9 @@ final class Fit3Client: NSObject, ObservableObject {
     @Published var caloriesToday: Double?
     @Published var distanceToday: Double?
     @Published var lastHealthSync: Date?
+    @Published var lastSpO2: Int?
+    @Published var lastSpO2Date: Date?
+    @Published var heartHistory: [HeartSample] = []
     @Published var healthHandshake = false
     @Published var healthLog: [String] = []
 
@@ -511,6 +514,30 @@ final class Fit3Client: NSObject, ObservableObject {
                 changed = true
             }
         }
+        if r.days.isEmpty, let c = r.calories.last(where: { $0.day.map { cal.isDateInToday($0) } ?? false }) {
+            let total = Double((c.active ?? 0) + (c.rest ?? 0))
+            if total > 0 { caloriesToday = total; changed = true }
+        }
+        if !r.heart.isEmpty {
+            var all = heartHistory + r.heart
+            all.sort { $0.time < $1.time }
+            var seen = Set<Int>()
+            all = all.filter { seen.insert(Int($0.time.timeIntervalSince1970)).inserted }
+            let dayAgo = Date().addingTimeInterval(-86400)
+            heartHistory = Array(all.filter { $0.time > dayAgo }.suffix(500))
+            if let latest = heartHistory.last, latest.time > (lastBpmDate ?? .distantPast) {
+                lastBpm = latest.bpm
+                lastBpmDate = latest.time
+            }
+            healthNote("heart rate: \(r.heart.count) points, latest \(heartHistory.last?.bpm ?? 0) bpm")
+            changed = true
+        }
+        if let s = r.spo2.max(by: { $0.time < $1.time }), s.time > (lastSpO2Date ?? .distantPast) {
+            lastSpO2 = s.value
+            lastSpO2Date = s.time
+            healthNote("SpO2: \(s.value)%")
+            changed = true
+        }
         if !r.steps.isEmpty || !r.days.isEmpty || changed {
             lastHealthSync = Date()
             saveTodayActivity()
@@ -543,6 +570,12 @@ final class Fit3Client: NSObject, ObservableObject {
         if let v = distanceToday { d["dist"] = v }
         if let v = lastHealthSync { d["sync"] = v.timeIntervalSince1970 }
         UserDefaults.standard.set(d, forKey: key)
+        if let v = lastSpO2, let t = lastSpO2Date {
+            UserDefaults.standard.set(["value": Double(v), "time": t.timeIntervalSince1970], forKey: "lastSpO2")
+        }
+        if let data = try? JSONEncoder().encode(heartHistory) {
+            UserDefaults.standard.set(data, forKey: "heartHistory")
+        }
     }
 
     func loadTodayActivity() {
@@ -553,6 +586,45 @@ final class Fit3Client: NSObject, ObservableObject {
         caloriesToday = d["kcal"]
         distanceToday = d["dist"]
         lastHealthSync = d["sync"].map { Date(timeIntervalSince1970: $0) }
+        if let o = UserDefaults.standard.dictionary(forKey: "lastSpO2") as? [String: Double],
+           let v = o["value"], let t = o["time"] {
+            lastSpO2 = Int(v)
+            lastSpO2Date = Date(timeIntervalSince1970: t)
+        }
+        if let data = UserDefaults.standard.data(forKey: "heartHistory"),
+           let list = try? JSONDecoder().decode([HeartSample].self, from: data) {
+            heartHistory = list.filter { $0.time > Date().addingTimeInterval(-86400) }
+        }
+    }
+
+    // MARK: - Widgets (canal 0x0F, WidgetsService)
+
+    /// Ordem que a pulseira tinha antes dos testes (log de 19/11).
+    static let defaultWidgetOrder: [UInt8] = [0x17, 0x15, 0x1C, 0x02, 0x08, 0x06, 0x19, 0x18]
+
+    func requestWidgets() {
+        guard sessionReady else { return }
+        send(L("Request widgets"), FrameCodec.cmd(0x0F, [0x00]))
+    }
+
+    /// SET_WIDGET_INFO: 01 01 <n> {03 <id> 02 <posicao>} em ordem de id (como o plugin manda).
+    func setWidgets(_ list: [BandWidget]) {
+        guard sessionReady, !list.isEmpty else { return }
+        var out: [UInt8] = [0x01, 0x01, UInt8(list.count)]
+        for w in list.sorted(by: { $0.id < $1.id }) { out += [0x03, w.id, 0x02, w.slot] }
+        send(L("Save widgets"), FrameCodec.cmd(0x0F, out))
+        widgets = list
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.requestWidgets() }
+    }
+
+    func widgetName(_ id: UInt8) -> String {
+        if let n = UserDefaults.standard.string(forKey: "widgetName.\(id)"), !n.isEmpty { return n }
+        return L("Widget %@", String(format: "%02X", id))
+    }
+
+    func renameWidget(_ id: UInt8, _ name: String) {
+        UserDefaults.standard.set(name, forKey: "widgetName.\(id)")
+        objectWillChange.send()
     }
 
     // MARK: - Mostradores (canal 0x06, WatchfaceSerevice)

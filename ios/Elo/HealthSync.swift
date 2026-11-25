@@ -167,12 +167,39 @@ struct DaySummary: Codable, Equatable {
     var activeSeconds: Int?
 }
 
+/// Frequencia cardiaca (tipo 0x0A): media do intervalo ou ponto do "binning" de 1 minuto.
+struct HeartSample: Codable, Equatable {
+    var time: Date
+    var bpm: Int
+    var min: Int?
+    var max: Int?
+}
+
+/// Oxigenio no sangue (tipo 0x70).
+struct SpO2Sample: Codable, Equatable {
+    var time: Date
+    var value: Int
+    var min: Int?
+    var max: Int?
+    var heartRate: Int?
+}
+
+/// Calorias do dia (tipo 0x17, CALORIES_BURNED).
+struct CalorieDay: Codable, Equatable {
+    var day: Date?
+    var active: Float?
+    var rest: Float?
+}
+
 /// O que deu para ler de um SYNC_DATA.
 struct HealthSyncResult {
     var seq: Int?
     var types: [UInt8] = []
     var steps: [StepRecord] = []
     var days: [DaySummary] = []
+    var heart: [HeartSample] = []
+    var spo2: [SpO2Sample] = []
+    var calories: [CalorieDay] = []
     var stoppedAt: UInt8?
 }
 
@@ -184,11 +211,20 @@ enum HealthSyncParser {
         0x04: "MSG_INFO", 0x05: "DEVICE_INFO", 0x07: "PEDO_STEP_COUNT", 0x08: "PEDO_EVENT",
         0x09: "PEDO_RECOMMENDATION", 0x0A: "HEART_RATE", 0x0B: "USER_PROFILE", 0x0C: "EXERCISE_AUTO",
         0x10: "SLEEP", 0x11: "SLEEP_STAGE", 0x12: "SLEEP_DATA", 0x13: "STRESS", 0x17: "CALORIES_BURNED",
-        0x18: "DELETED_DATA", 0x40: "WEARABLE_SETTING", 0x70: "OXYGEN_SATURATION",
+        0x18: "DELETED_DATA", 0x1B: "EXERCISE_MANUAL", 0x1C: "HEIGHT", 0x1D: "WEIGHT", 0x40: "WEARABLE_SETTING", 0x70: "OXYGEN_SATURATION",
         0x7C: "ACTIVE_CALORIES_GOAL", 0x7D: "ACTIVITY_DAILY_GOAL", 0x7E: "ACTIVITY_DAY_SUMMARY",
         0x7F: "CALORIES_BURNED_DETAILS", 0x80: "EXERCISE", 0x89: "SLEEP_COMBINED", 0x8A: "SLEEP_GOAL",
         0x8B: "SLEEP_RAW_DATA", 0xE0: "SEQUENCE_NUMBER",
     ]
+
+    /// Tipos com numero fixo de campos (FrameFieldCount do plugin): [continua]{tag valor} x N.
+    static let fieldCountTypes: [UInt8: Int] = [
+        0x08: 6, 0x09: 5, 0x0E: 6, 0x0F: 7, 0x11: 8, 0x15: 6, 0x16: 6, 0x17: 7, 0x18: 3, 0x1C: 4, 0x1D: 4,
+        0x7C: 5, 0x7D: 5, 0x8A: 8, 0x8C: 8, 0x8D: 7, 0x94: 6, 0x9D: 5, 0x9E: 5, 0x9F: 5, 0xA1: 5,
+    ]
+
+    /// Tipos com tamanho em bytes antes de cada registro.
+    static let sizedTypes: Set<UInt8> = [0x0A, 0x0C, 0x0D, 0x10, 0x12, 0x13, 0x14, 0x1B]
 
     static func name(_ t: UInt8) -> String {
         typeNames[t] ?? String(format: "0x%02X", t)
@@ -223,13 +259,20 @@ enum HealthSyncParser {
             case 0x07:
                 guard let next = parseSteps(msg, pos, into: &r) else { r.stoppedAt = type; return r }
                 pos = next
-            case 0x70...0xBF:
-                // Tipos novos: [continua 0/1][tamanho 4 bytes][corpo], repetido.
-                guard let next = parseSized(msg, pos, type: type, into: &r) else { r.stoppedAt = type; return r }
-                pos = next
             default:
-                r.stoppedAt = type
-                return r
+                if let fields = fieldCountTypes[type] {
+                    guard let next = parseFieldList(msg, pos, type: type, fields: fields, into: &r) else {
+                        r.stoppedAt = type; return r
+                    }
+                    pos = next
+                } else if sizedTypes.contains(type) || (0x70...0xA6).contains(type) {
+                    // [continua 0/1][tamanho 4 bytes][corpo], repetido.
+                    guard let next = parseSized(msg, pos, type: type, into: &r) else { r.stoppedAt = type; return r }
+                    pos = next
+                } else {
+                    r.stoppedAt = type
+                    return r
+                }
             }
         }
         return r
@@ -281,13 +324,131 @@ enum HealthSyncParser {
             let len = Int(len32)
             let bodyStart = pos + 5
             guard len >= 0, bodyStart + len <= b.count else { return nil }
-            if type == 0x7E {
-                r.days.append(parseDaySummary(Array(b[bodyStart..<(bodyStart + len)])))
+            let body = Array(b[bodyStart..<(bodyStart + len)])
+            switch type {
+            case 0x7E: r.days.append(parseDaySummary(body))
+            case 0x0A: r.heart += parseHeart(body)
+            case 0x70: if let s = parseSpO2(body) { r.spo2.append(s) }
+            default: break
             }
             pos = bodyStart + len
             if more == 0 { return pos }
         }
         return nil
+    }
+
+    /// Lista generica de campos: 117 = uuid (16 bytes), o resto 4 bytes.
+    private static func parseFieldList(_ b: [UInt8], _ start: Int, type: UInt8, fields: Int,
+                                       into r: inout HealthSyncResult) -> Int? {
+        var pos = start
+        while pos < b.count {
+            let more = b[pos]
+            pos += 1
+            var cal = CalorieDay()
+            for _ in 0..<fields {
+                guard pos < b.count else { return nil }
+                let tag = b[pos]
+                pos += 1
+                if tag == 117 { pos += 16; continue }
+                guard let v = HealthProto.read32(b, pos) else { return nil }
+                pos += 4
+                if type == 0x17 {
+                    switch tag {
+                    case 112: cal.day = date(v)
+                    case 113: cal.active = float(v)
+                    case 114: cal.rest = float(v)
+                    default: break
+                    }
+                }
+            }
+            if pos > b.count { return nil }
+            if type == 0x17 { r.calories.append(cal) }
+            if more == 0 { return pos }
+        }
+        return nil
+    }
+
+    /// Frequencia: 01 inicio, 02 fim, 03/05/97/99 (4B); 20 bpm, 21 min, 22 max, 23 batidas (1B);
+    /// 24 binning (tamanho 4B, depois 4B por minuto: minuto, bpm, min, max); 25 tag (2B).
+    private static func parseHeart(_ b: [UInt8]) -> [HeartSample] {
+        var start: Date?
+        var bpm: Int?
+        var lo: Int?
+        var hi: Int?
+        var bins: [HeartSample] = []
+        var i = 0
+        while i < b.count {
+            let tag = b[i]
+            i += 1
+            switch tag {
+            case 32, 33, 34, 35:
+                guard i < b.count else { break }
+                let v = Int(b[i])
+                if tag == 32 { bpm = v } else if tag == 33 { lo = v } else if tag == 34 { hi = v }
+                i += 1
+            case 37:
+                i += 2
+            case 36:
+                guard let n = HealthProto.read32(b, i) else { return [] }
+                i += 4
+                let end = min(b.count, i + Int(n))
+                var k = i
+                while k + 3 < end {
+                    if let s = start, b[k + 1] > 0 {
+                        bins.append(HeartSample(time: s.addingTimeInterval(Double(b[k]) * 60), bpm: Int(b[k + 1]),
+                                                min: Int(b[k + 2]), max: Int(b[k + 3])))
+                    }
+                    k += 4
+                }
+                i = end
+            default:
+                guard let v = HealthProto.read32(b, i) else { i = b.count; break }
+                if tag == 1 { start = date(v) }
+                i += 4
+            }
+        }
+        if !bins.isEmpty { return bins }
+        if let s = start, let v = bpm, v > 0 { return [HeartSample(time: s, bpm: v, min: lo, max: hi)] }
+        return []
+    }
+
+    /// SpO2: 01 inicio (4B), 75 uuid (16B), A9 spo2, AA bpm, AB min, AC max (1B), AD (2B), AF binning.
+    private static func parseSpO2(_ b: [UInt8]) -> SpO2Sample? {
+        var start: Date?
+        var value: Int?
+        var lo: Int?
+        var hi: Int?
+        var hr: Int?
+        var i = 0
+        while i < b.count {
+            let tag = b[i]
+            i += 1
+            switch tag {
+            case 117:
+                i += 16
+            case 169, 170, 171, 172:
+                guard i < b.count else { break }
+                let v = Int(b[i])
+                switch tag {
+                case 169: value = v
+                case 170: hr = v
+                case 171: lo = v
+                default: hi = v
+                }
+                i += 1
+            case 173:
+                i += 2
+            case 175:
+                guard let n = HealthProto.read32(b, i) else { i = b.count; break }
+                i += 4 + Int(n)
+            default:
+                guard let v = HealthProto.read32(b, i) else { i = b.count; break }
+                if tag == 1 { start = date(v) }
+                i += 4
+            }
+        }
+        guard let s = start, let v = value, v > 0 else { return nil }
+        return SpO2Sample(time: s, value: v, min: lo, max: hi, heartRate: hr)
     }
 
     /// Campos do resumo do dia: tag + 4 bytes; 117 = uuid (16); 64/65/66 = listas com tamanho.

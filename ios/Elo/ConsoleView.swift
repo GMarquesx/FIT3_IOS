@@ -207,6 +207,8 @@ struct ConsoleView: View {
 
             FaceLabView()
 
+            WidgetsView()
+
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text(L("Health sync")).font(EloFont.inter(15, .semibold)).foregroundColor(EloColor.text)

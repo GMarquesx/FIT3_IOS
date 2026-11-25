@@ -316,3 +316,17 @@
 "Apps list" = "Lista de apps";
 "synced %@" = "sincronizado %@";
 "from steps today" = "dos passos de hoje";
+
+/* v0.3: widgets (canal 0x0F) e SpO2 */
+"Request widgets" = "Pedir widgets";
+"Save widgets" = "Gravar widgets";
+"Widget %@" = "Widget %@";
+"measured %@" = "medido %@";
+"Widgets" = "Widgets";
+"Choose which widgets show when you swipe on the band, and in what order. Long-press a widget to name it." = "Escolha quais widgets aparecem ao deslizar na pulseira e em que ordem. Segure um widget para dar um nome.";
+"Connect the band to load its widgets." = "Conecte a pulseira para carregar os widgets.";
+"On the band (%d)" = "Na pulseira (%d)";
+"Hidden (%d)" = "Ocultos (%d)";
+"Restore default" = "Restaurar padrão";
+"Save to band" = "Gravar na pulseira";
+"Name this widget" = "Nome do widget";

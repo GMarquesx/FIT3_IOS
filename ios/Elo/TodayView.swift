@@ -285,7 +285,8 @@ struct TodayView: View {
                        detail: band.caloriesToday == nil ? L("Waiting for sync") : L("from steps today"))
             heartCard
             MetricCard(icon: Icons.oxygen, tint: Color(hex: 0x5AB8FF), tintBg: Color(hex: 0x132A3D),
-                       title: L("Oxygen"), value: "—", unit: L("% SpO₂"), detail: L("Waiting for sync"))
+                       title: L("Oxygen"), value: band.lastSpO2.map { "\($0)" } ?? "—", unit: L("% SpO₂"),
+                       detail: band.lastSpO2Date.map { L("measured %@", EloFormat.relative($0)) } ?? L("Waiting for sync"))
         }
     }
 
@@ -309,7 +310,7 @@ struct TodayView: View {
                         Circle().fill(EloColor.pink).frame(width: 7, height: 7)
                     }
                 }
-                Sparkline(values: band.bpmSamples).frame(width: 140, height: 22)
+                Sparkline(values: band.bpmSamples.isEmpty ? band.heartHistory.suffix(60).map { $0.bpm } : band.bpmSamples).frame(width: 140, height: 22)
                 Text(heartDetail)
                     .font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
                     .lineLimit(1).minimumScaleFactor(0.8)
