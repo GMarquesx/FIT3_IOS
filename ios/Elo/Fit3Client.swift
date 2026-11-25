@@ -30,8 +30,8 @@ struct BandLanguage: Identifiable {
     let name: String
 }
 
-/// Mostrador instalado na pulseira (lista do canal 0x0F): id e posicao no carrossel (0xFF = fora).
-struct WatchFace: Identifiable, Equatable {
+/// Widget (tile) da pulseira (lista do canal 0x0F, servico WidgetsService): id e posicao (0xFF = fora).
+struct BandWidget: Identifiable, Equatable {
     let id: UInt8
     let slot: UInt8
 }
@@ -69,11 +69,17 @@ final class Fit3Client: NSObject, ObservableObject {
     @Published var measuringHR = false
     @Published var lastBpm: Int?
     @Published var lastBpmDate: Date?
-    @Published var watchFaces: [WatchFace] = []
-    @Published var faceLabLog: [String] = []
-    @Published var probeRunning = false
-    @Published var probeIndex = 0
-    @Published var probeTotal = 0
+    @Published var widgets: [BandWidget] = []
+    @Published var bandFaces: [BandFace] = []
+    @Published var currentFaceId: Int?
+    @Published var maxFaces: Int?
+    @Published var stepsToday: Int?
+    @Published var stepGoal: Int?
+    @Published var caloriesToday: Double?
+    @Published var distanceToday: Double?
+    @Published var lastHealthSync: Date?
+    @Published var healthHandshake = false
+    @Published var healthLog: [String] = []
 
     static let sapService = CBUUID(string: "1A1A")
     static let sapNotifyUUID = CBUUID(string: "797AE4E9-2E58-4FE8-B48D-B5C79599FB9B")
@@ -100,7 +106,10 @@ final class Fit3Client: NSObject, ObservableObject {
     private var nextFrameId = 0
     private var notificationCounter = Int(Date().timeIntervalSince1970) % 100000
     private var rssiTimer: Timer?
-    private var probeItems: [DispatchWorkItem] = []
+    private var rxBuffer: [UInt8] = []
+    private var rxBufferDate = Date.distantPast
+    private var largeData = LargeDataAssembler()
+    private var healthSeq = 0
     private var lastBuzz: Date = .distantPast
     private var lastHRMeasure: Date = .distantPast
     private var hrStopWork: DispatchWorkItem?
@@ -159,10 +168,10 @@ final class Fit3Client: NSObject, ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: "vibrationCooldown"); objectWillChange.send() }
     }
 
-    /// Responde o 0A/A2 periodico com eco em 0A/62 (no PC isso fez a pulseira parar de repetir).
-    var autoAckA2: Bool {
-        get { UserDefaults.standard.object(forKey: "autoAckA2") as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: "autoAckA2"); objectWillChange.send() }
+    /// Responde o handshake de saude (0A/A2) como o plugin oficial e confirma os SYNC_DATA.
+    var healthSyncEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: "healthSyncEnabled") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "healthSyncEnabled"); objectWillChange.send() }
     }
 
     private let clock: DateFormatter = {
@@ -192,6 +201,7 @@ final class Fit3Client: NSObject, ObservableObject {
            let list = try? JSONDecoder().decode([SentNotification].self, from: data) {
             history = list
         }
+        loadTodayActivity()
         central = CBCentralManager(delegate: self, queue: .main,
                                    options: [CBCentralManagerOptionRestoreIdentifierKey: "elo.central"])
         let nc = NotificationCenter.default
@@ -324,6 +334,7 @@ final class Fit3Client: NSObject, ObservableObject {
         }
         send(L("Sync time"), Fit3Protocol.timeSync())
         send(L("Request: battery"), FrameCodec.cmd(0x0B, [0x02]))
+        if healthHandshake { requestHealthData() }
     }
 
     func vibrate() {
@@ -382,106 +393,202 @@ final class Fit3Client: NSObject, ObservableObject {
         send(L("Band language (id %d)", Int(id)), Fit3Protocol.language(id))
     }
 
-    // MARK: - Sonda (procura os comandos de passos, sono etc.)
+    // MARK: - Saude (canal 0x0A): handshake, dados grandes e SYNC_DATA
 
-    /// Rodada 2: o canal 0x18 so respondeu a pedidos do tipo 0x80 (18/80 e 18/40 02 01 devolveram a
-    /// tabela 18/C0). Aqui vao os pedidos 0x81..0x8F, com e sem o id do tipo de dado (01..0A da tabela).
-    static func probeList() -> [(String, Data)] {
-        var list: [(String, Data)] = []
-        func add(_ ch: UInt8, _ data: [UInt8]) {
-            let label = String(format: "Probe %02X/%02X", ch, data.first ?? 0)
-                + (data.count > 1 ? " " + FrameCodec.hex(Array(data.dropFirst())) : "")
-            list.append((label, FrameCodec.cmd(ch, data)))
-        }
-        for c: UInt8 in 0x81...0x8F { add(0x18, [c]) }
-        for t: UInt8 in 0x01...0x0A { add(0x18, [0x81, t]) }
-        for t: UInt8 in 0x01...0x0A { add(0x18, [0x82, t]) }
-        for c: UInt8 in 0x81...0x86 { add(0x18, [c, 0x02, 0x01]) }
-        for c: UInt8 in 0x41...0x46 { add(0x18, [c, 0x02, 0x01]) }
-        return list
-    }
-
-    func startProbe() {
-        guard sessionReady, !probeRunning else { return }
-        let list = Fit3Client.probeList()
-        probeItems.forEach { $0.cancel() }
-        probeItems = []
-        if !recording { toggleRecording() }
-        probeRunning = true
-        probeIndex = 0
-        probeTotal = list.count
-        log("probe: \(list.count) requests, 2.5 s apart")
-        for (i, item) in list.enumerated() {
-            let work = DispatchWorkItem { [weak self] in
-                guard let self = self, self.probeRunning else { return }
-                self.probeIndex = i + 1
-                self.send("#\(i + 1) " + item.0, item.1)
+    /// Trata uma mensagem do canal de saude e devolve o rotulo para o console.
+    private func handleHealth(_ msg: [UInt8]) -> String {
+        guard let first = msg.first else { return "0A" }
+        let h = HealthProto.Header(first)
+        switch h.msgId {
+        case HealthProto.MsgId.largeChunk:
+            switch largeData.feed(msg) {
+            case .waiting:
+                return L("Health data (part)")
+            case .complete(let full, let ack):
+                sendHealth("Large data ACK", ack)
+                let inner = processHealthMessage(full)
+                return L("Health data complete · %@", inner)
+            case .failed(let nack):
+                sendHealth("Large data NACK", nack)
+                healthNote("large data out of order, sent NACK")
+                return L("Health data (out of order)")
             }
-            probeItems.append(work)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 * Double(i), execute: work)
+        case HealthProto.MsgId.largeAck:
+            return (msg.count > 1 && msg[1] & 0x03 == 1) ? "Large data ACK" : "Large data NACK"
+        default:
+            return processHealthMessage(msg)
         }
-        let done = DispatchWorkItem { [weak self] in
-            self?.probeRunning = false
-            self?.log("probe finished")
+    }
+
+    private func processHealthMessage(_ msg: [UInt8]) -> String {
+        guard let first = msg.first else { return "0A" }
+        let h = HealthProto.Header(first)
+        switch (h.isResponse, h.msgId) {
+        case (false, HealthProto.MsgId.gmCapabilityRequest):
+            guard healthSyncEnabled else { return L("Health handshake (ignored)") }
+            let r = HealthProto.gmCapabilityResponse(to: msg)
+            if let seq = r.seq { healthSeq = seq }
+            sendHealth(L("Health handshake reply"), r.reply)
+            if !healthHandshake {
+                healthHandshake = true
+                healthNote("handshake: seq \(r.seq ?? -1), protocol \(r.version ?? -1)")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                    self?.sendHealth(L("Health capability request"), HealthProto.healthCapabilityRequest)
+                }
+            }
+            return L("Health handshake")
+        case (_, HealthProto.MsgId.syncData), (true, HealthProto.MsgId.requestData):
+            let isRequestData = h.msgId == HealthProto.MsgId.requestData
+            let result = HealthSyncParser.parse(msg, isRequestData: isRequestData)
+            if let seq = result.seq {
+                healthSeq = max(healthSeq, seq)
+                if !isRequestData && healthSyncEnabled {
+                    sendHealth(L("Sync ACK"), HealthProto.syncAck(seq: seq, ok: true))
+                }
+            }
+            applySync(result)
+            let names = result.types.map { HealthSyncParser.name($0) }.joined(separator: ", ")
+            healthNote("sync \(msg.count) B: \(names)" + (result.stoppedAt.map { " · stopped at " + HealthSyncParser.name($0) } ?? ""))
+            return L("Health sync (%d B)", msg.count)
+        case (true, HealthProto.MsgId.gmCapabilityNoti):
+            return L("Health capability OK")
+        case (_, 32), (_, 33):
+            healthNote("band capability \(msg.count) B")
+            return L("Band health capability")
+        case (_, HealthProto.MsgId.wearableMsg):
+            healthNote("wearable message \(msg.count) B")
+            return L("Health message")
+        case (_, HealthProto.MsgId.shealthInstall), (_, HealthProto.MsgId.shealthUpgrade), (_, HealthProto.MsgId.shealthStore):
+            healthNote("band asks for Samsung Health (msg \(h.msgId))")
+            return L("Band asks for Samsung Health")
+        default:
+            return String(format: "0A/%02X", first)
         }
-        probeItems.append(done)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5 * Double(list.count) + 4, execute: done)
     }
 
-    func stopProbe() {
-        probeItems.forEach { $0.cancel() }
-        probeItems = []
-        probeRunning = false
-        log("probe stopped")
+    /// Pede os dados de saude agora (REQUEST_DATA), como o Samsung Health faz ao abrir.
+    func requestHealthData() {
+        guard sessionReady else { return }
+        healthSeq += 1
+        sendHealth(L("Request health data"), HealthProto.requestData(seq: healthSeq))
     }
 
-    // MARK: - Laboratorio de mostradores (canal 0x0F)
-
-    /// "01 <n>" + n x "03 <id> 02 <posicao>" (como a pulseira manda no 0F/00).
-    static func encodeFaceList(_ faces: [WatchFace]) -> [UInt8] {
-        var out: [UInt8] = [0x01, UInt8(faces.count)]
-        for f in faces { out += [0x03, f.id, 0x02, f.slot] }
-        return out
+    private func sendHealth(_ label: String, _ msg: [UInt8]) {
+        send(label, FrameCodec.cmd(0x0A, msg))
     }
 
-    /// Mesma lista com o mostrador escolhido na posicao 1 e os outros empurrados.
-    func faceListWithFirst(_ id: UInt8) -> [WatchFace] {
-        let inCarousel = watchFaces.filter { $0.slot != 0xFF && $0.id != id }.sorted { $0.slot < $1.slot }
-        var ordered = [WatchFace(id: id, slot: 1)]
-        for (i, f) in inCarousel.enumerated() { ordered.append(WatchFace(id: f.id, slot: UInt8(i + 2))) }
-        let rest = watchFaces.filter { $0.slot == 0xFF && $0.id != id }
-        return ordered + rest
+    private func healthNote(_ text: String) {
+        healthLog.insert("\(clock.string(from: Date()))  \(text)", at: 0)
+        if healthLog.count > 40 { healthLog.removeLast(healthLog.count - 40) }
+        log("health: \(text)")
     }
 
-    /// Tentativas para "usar este mostrador"; o usuario diz qual funcionou.
-    func faceAttempts(for id: UInt8) -> [(String, Data)] {
-        let list = Fit3Client.encodeFaceList(faceListWithFirst(id))
-        return [
-            ("0F/01 03 id", FrameCodec.cmd(0x0F, [0x01, 0x03, id])),
-            ("0F/01 id", FrameCodec.cmd(0x0F, [0x01, id])),
-            ("0F/02 03 id", FrameCodec.cmd(0x0F, [0x02, 0x03, id])),
-            ("0F/02 id", FrameCodec.cmd(0x0F, [0x02, id])),
-            ("0F/03 03 id", FrameCodec.cmd(0x0F, [0x03, 0x03, id])),
-            ("0F/04 03 id", FrameCodec.cmd(0x0F, [0x04, 0x03, id])),
-            ("0F/81 03 id", FrameCodec.cmd(0x0F, [0x81, 0x03, id])),
-            ("0F/01 + list", FrameCodec.cmd(0x0F, [0x01] + list)),
-            ("0F/02 + list", FrameCodec.cmd(0x0F, [0x02] + list)),
-            ("0F/40 + list", FrameCodec.cmd(0x0F, [0x40] + list)),
-        ]
+    private func applySync(_ r: HealthSyncResult) {
+        let cal = Calendar.current
+        var changed = false
+        if let day = r.days.last(where: { $0.day.map { cal.isDateInToday($0) } ?? false }) ?? (r.days.count == 1 ? r.days.first : nil) {
+            if let v = day.steps { stepsToday = v; changed = true }
+            if let v = day.goal, v > 0 { stepGoal = v }
+            if let v = day.calories { caloriesToday = Double(v) }
+            if let v = day.distance { distanceToday = Double(v) }
+        } else {
+            let today = r.steps.filter { $0.start.map { cal.isDateInToday($0) } ?? false }
+            if !today.isEmpty {
+                // Registros por intervalo: guarda por horario de inicio (reenvio nao conta duas vezes).
+                var buckets = stepBuckets
+                for rec in today {
+                    guard let start = rec.start else { continue }
+                    buckets[String(Int(start.timeIntervalSince1970))] = [Double(max(rec.steps, 0)),
+                                                                         Double(rec.calories ?? 0),
+                                                                         Double(rec.distance ?? 0)]
+                }
+                stepBuckets = buckets
+                stepsToday = Int(buckets.values.reduce(0) { $0 + $1[0] })
+                let kcal = buckets.values.reduce(0) { $0 + $1[1] }
+                if kcal > 0 { caloriesToday = kcal }
+                let dist = buckets.values.reduce(0) { $0 + $1[2] }
+                if dist > 0 { distanceToday = dist }
+                changed = true
+            }
+        }
+        if !r.steps.isEmpty || !r.days.isEmpty || changed {
+            lastHealthSync = Date()
+            saveTodayActivity()
+        }
     }
 
-    func tryFace(_ id: UInt8, attempt index: Int) {
-        let attempts = faceAttempts(for: id)
-        guard sessionReady, index < attempts.count else { return }
-        if !recording { toggleRecording() }
-        let a = attempts[index]
-        send(String(format: "Face %02X · try %d · ", id, index + 1) + a.0, a.1)
+    private static let dayKey: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// Registros de passos de hoje: inicio (s) -> [passos, kcal, distancia].
+    private var stepBuckets: [String: [Double]] {
+        get {
+            let key = "stepRecords." + Fit3Client.dayKey.string(from: Date())
+            return UserDefaults.standard.dictionary(forKey: key) as? [String: [Double]] ?? [:]
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "stepRecords." + Fit3Client.dayKey.string(from: Date()))
+        }
     }
 
-    func noteFaceResult(_ text: String) {
-        faceLabLog.insert("\(clock.string(from: Date()))  \(text)", at: 0)
-        log("face lab: \(text)")
+    private func saveTodayActivity() {
+        let key = "activity." + Fit3Client.dayKey.string(from: Date())
+        var d: [String: Double] = [:]
+        if let v = stepsToday { d["steps"] = Double(v) }
+        if let v = stepGoal { d["goal"] = Double(v) }
+        if let v = caloriesToday { d["kcal"] = v }
+        if let v = distanceToday { d["dist"] = v }
+        if let v = lastHealthSync { d["sync"] = v.timeIntervalSince1970 }
+        UserDefaults.standard.set(d, forKey: key)
     }
+
+    func loadTodayActivity() {
+        let key = "activity." + Fit3Client.dayKey.string(from: Date())
+        let d = UserDefaults.standard.dictionary(forKey: key) as? [String: Double] ?? [:]
+        stepsToday = d["steps"].map { Int($0) }
+        stepGoal = d["goal"].map { Int($0) } ?? stepGoal
+        caloriesToday = d["kcal"]
+        distanceToday = d["dist"]
+        lastHealthSync = d["sync"].map { Date(timeIntervalSince1970: $0) }
+    }
+
+    // MARK: - Mostradores (canal 0x06, WatchfaceSerevice)
+
+    private func handleFaces(_ msg: [UInt8]) -> String {
+        guard let first = msg.first else { return "06" }
+        let cmd = first & 0x3F
+        switch cmd {
+        case BandFaceProto.Command.getAllInfo.rawValue:
+            let info = BandFaceProto.parseAllInfo(msg)
+            if !info.faces.isEmpty { bandFaces = info.faces }
+            currentFaceId = info.currentId ?? bandFaces.first(where: { $0.isCurrent })?.id
+            maxFaces = info.maxCount
+            return L("Watch faces (%d)", info.faces.count)
+        case BandFaceProto.Command.setCurrent.rawValue, BandFaceProto.Command.getCurrent.rawValue:
+            if let id = BandFaceProto.parseCurrent(msg) {
+                currentFaceId = id
+                for k in bandFaces.indices { bandFaces[k].isCurrent = bandFaces[k].id == id }
+                return L("Current watch face %d", id)
+            }
+            return L("Watch face changed")
+        default:
+            return String(format: "06/%02X", first)
+        }
+    }
+
+    func requestFaces() {
+        guard sessionReady else { return }
+        send(L("Request watch faces"), FrameCodec.cmd(0x06, BandFaceProto.getAllInfo))
+    }
+
+    func setFace(_ face: BandFace) {
+        guard sessionReady else { return }
+        send(L("Use watch face %d", face.id), FrameCodec.cmd(0x06, BandFaceProto.setCurrent(id: face.id, sampler: face.samplerId)))
+    }
+
 
     func toggleRecording() {
         if recording {
@@ -551,6 +658,7 @@ final class Fit3Client: NSObject, ObservableObject {
                 self.mtu = p.maximumWriteValueLength(for: .withoutResponse) + 3
             }
             self.startRSSI()
+            self.requestFaces()
         }
     }
 
@@ -569,6 +677,34 @@ final class Fit3Client: NSObject, ObservableObject {
     }
 
     // MARK: - Recebido da pulseira
+
+    /// Junta frames SAP que chegam quebrados em varias notificacoes (dados de saude sao grandes).
+    private func ingestSAP(_ value: Data) {
+        let b = [UInt8](value)
+        if !rxBuffer.isEmpty && Date().timeIntervalSince(rxBufferDate) > 3 {
+            rxBuffer.removeAll()
+        }
+        if rxBuffer.isEmpty && b.count >= 2 && b[0] == 0x68 && (b[1] == 0x14 || b[1] == 0x15) {
+            handleRX(value)
+            return
+        }
+        rxBuffer += b
+        rxBufferDate = Date()
+        while rxBuffer.count >= 6 {
+            let len = (Int(rxBuffer[0]) << 8) | Int(rxBuffer[1])
+            let hdr = (UInt16(rxBuffer[2]) << 8) | UInt16(rxBuffer[3])
+            guard hdr == FrameCodec.crc16ARC(Array(rxBuffer[0..<2])) else {
+                handleRX(Data(rxBuffer))
+                rxBuffer.removeAll()
+                return
+            }
+            let total = len + 6
+            guard rxBuffer.count >= total else { return }
+            let frame = Array(rxBuffer[0..<total])
+            rxBuffer.removeFirst(total)
+            handleRX(Data(frame))
+        }
+    }
 
     private func handleRX(_ value: Data) {
         lastContact = Date()
@@ -600,21 +736,20 @@ final class Fit3Client: NSObject, ObservableObject {
             } else if f.channel == 0x1F {
                 label = L("Find band")
             } else if f.channel == 0x0F && f.data.count >= 2 && f.data[0] == 0x01 {
-                var list: [WatchFace] = []
+                var list: [BandWidget] = []
                 var i = 2
                 while i + 3 < f.data.count && f.data[i] == 0x03 && f.data[i + 2] == 0x02 {
-                    list.append(WatchFace(id: f.data[i + 1], slot: f.data[i + 3]))
+                    list.append(BandWidget(id: f.data[i + 1], slot: f.data[i + 3]))
                     i += 4
                 }
-                if !list.isEmpty { watchFaces = list }
-                label = L("Watch faces (%d)", list.count)
-            } else if f.channel == 0x0A && f.command == 0xA2 {
-                label = "0A/A2 (keep-alive)"
-                if autoAckA2 {
-                    send("Ack 0A/62", FrameCodec.cmd(0x0A, [0x62] + f.data))
-                }
+                if !list.isEmpty { widgets = list }
+                label = L("Widgets (%d)", list.count)
+            } else if f.channel == 0x0A {
+                label = handleHealth([f.command] + f.data)
+            } else if f.channel == 0x06 {
+                label = handleFaces([f.command] + f.data)
             } else if f.channel == 0x18 {
-                label = L("Health %@", "18/" + cm)
+                label = L("Apps list")
             }
             addFrame(dir: "RX", data: value, label: label, error: false)
         }
@@ -641,8 +776,10 @@ final class Fit3Client: NSObject, ObservableObject {
     }
 
     private func resetLink() {
-        if probeRunning { stopProbe() }
         hrStopWork?.cancel()
+        rxBuffer.removeAll()
+        largeData.reset()
+        healthHandshake = false
         measuringHR = false
         hrContact = false
         connected = false
@@ -807,6 +944,6 @@ extension Fit3Client: CBPeripheralDelegate {
             }
             return
         }
-        handleRX(value)
+        ingestSAP(value)
     }
 }

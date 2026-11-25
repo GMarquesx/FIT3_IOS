@@ -1,4 +1,4 @@
-# Galaxy Fit3 – notas de protocolo (atualizado 19/11/2026, sessão 2)
+# Galaxy Fit3 – notas de protocolo (atualizado 25/11/2026, análise do plugin oficial)
 
 ## ✅ Configuração inicial concluída pelo PC (sessão 2)
 - Comando **`01 40 01 01 84 01`** (canal 01, cmd 0x84, dado 01) → pulseira responde `01/44` e sai de
@@ -71,30 +71,85 @@
 ## Tipo do comando (2 bits altos do CMD) – visto nos logs de 19/11
 - `cmd & 0x3F` = id do comando; `cmd & 0xC0` = tipo. Respostas: 01/01→41, 01/83→43, 07/50→**D0**, 07/0D→4D.
 - A pulseira também inicia mensagens (tipo `0x80`): `04/86`, `07/90`, `0A/89`, `0A/A2`, `18/C0`, `1A/80`.
-- **`0A/A2` = keep-alive com contador** (`02 e0 SS SS e1 2d 01`, SS = 16 bits LE, +2 a cada envio), repetido a cada ~19,6 s
-  enquanto não é respondido. Eco em **`0A/62`** com os mesmos dados fez a pulseira parar de repetir (log `testar`, 80,4 s).
-  O app iOS responde automaticamente (Console → "Responder o keep-alive 0A/A2").
-- **Canal 0x18 (saúde?)**: aparece só depois do `01/84 01`. `18/C0` traz uma tabela
+- `0A/A2` (`02 e0 SS SS e1 2d 01`) repete a cada ~19,6 s enquanto não é respondido. O eco em `0A/62` só calava a
+  pulseira; o significado real está na seção do canal 0x0A abaixo.
+- **Canal 0x18 (AppsSAPAgent = lista de apps, não saúde)**: aparece só depois do `01/84 01`. `18/C0` traz uma tabela
   `02 01 03 0a` + 10 pares `00 <tipo> 01 <id>`: 01→01, 02→02, 03→03, 04→04, 05→05, 07→06, 08→07, 09→08, 0C→09, 06→0A.
-  Hipótese: lista de métricas (passos, frequência, sono, SpO₂…). Próximo passo: sonda do app iOS (Console → Sonda de saúde).
+  São os apps da pulseira (ordem/ids). As sondas no 0x18 estavam no canal errado.
 - `0A/04` e `0A/89` começam com `e0 SS SS` (mesmo contador do A2) → o canal 0A tem um sub-protocolo com número de sequência.
 - Sonda rodada 1 (20/11): pedidos tipo 00 no 0x18 (18/01..0F, com 01 e 00 01) → só ACK de transporte, sem resposta.
   `18/80` e `18/40 02 01` → pulseira reenviou `18/C0` (tabela). Conclusão: o 0x18 responde a pedidos tipo 0x80/0x40
   com respostas tipo 0xC0. Rodada 2: 18/81..8F, 18/81 <tipo>, 18/82 <tipo>.
 - `04/86 00` chega em pares a cada poucos segundos em alguns momentos (pulseira esperando resposta?).
 
-## Canal 0x0F = mostradores (watch faces)
-- Ao conectar a pulseira manda `0F/00 01 <n> {03 <id> 02 <posição>} x n`. Ex.: 19 ids; posições 01..08 = carrossel,
-  `ff` = instalado mas fora do carrossel. Ordem vista: 17, 15, 1C, 02, 08, 06, 19, 18 (posições 1–8).
-- Comando para trocar o mostrador: em teste no app iOS (Console → Mostradores), tentativas 0F/01, 0F/02, 0F/03,
-  0F/04, 0F/81 com `03 <id>` e a lista reordenada.
-- Papel de parede com foto e complicações: ainda desconhecidos (provável transferência de arquivo; precisa de captura
-  do Galaxy Wearable no Android).
+## Mapa de canais (do plugin oficial, `res/xml/hmaccessoryservices_new.xml`)
+O canal é o `serviceId` do SAP. Isso corrige os palpites anteriores: **0x0F são widgets** e **0x18 é a lista de apps**.
+
+| ID | Serviço | ID | Serviço | ID | Serviço |
+|---|---|---|---|---|---|
+| 01 | OOBE | 0B | FullSetting | 15–16 | — |
+| 02 | FMD | 0C | Debug | 17 | CC |
+| 03 | SACall | 0D | alarm | 18 | AppsSAPAgent |
+| 04 | lbs-server | 0E | Reminder | 19 | SOS |
+| 05 | Weather | 0F | WidgetsService | 1A | SharedInfo |
+| 06 | **WatchfaceSerevice** | 10 | Runestone | 1B | worldclock |
+| 07 | Notification | 11 | BandAlarm | 1C | timer |
+| 08 | SACalendar | 12 | QuickMessage | 1D | medicalinfo |
+| 09 | music | 13 | QS | 1E | OtaTransfer |
+| 0A | **HealthService** | 14 | BandSALogging | 1F | Find |
+
+## Canal 0x06 = mostradores (BandFace)
+- Byte 0 = tipo (`0x40` = resposta) | comando (6 bits). Depois pares `parâmetro valor` (1 byte), ou
+  `parâmetro tamanho bytes` para textos. Little endian.
+- Comandos: 00 GET_ALL_INFO, 01 GET_LIST, 02 GET_CURRENT, 03 SET_CURRENT, 04 INSTALL, 05 DELETE, 06 GET_EDIT_INFO,
+  07 SET_EDIT_INFO, 08 CANCEL_EDIT, 09 GET_ORDER, 0A SET_ORDER, 0B ADD_IMAGE_LIST, 0C DELETE_IMAGE_LIST, 0E GET_IMAGE_LIST.
+- Parâmetros: 00 atual, 01 máximo, 02 qtd, 03 lista, 04 WF_ID, 05 versão, 06 nome, 07 descrição, 08 STYLE_ID (sampler),
+  09 posição, 0A estilo, 0B é atual, 0C editável, 0D tipo de relógio, 0E–10 ponteiros, 11 widgets, 13 fundo,
+  18 NUM_OF_PARAMS, 19 ordem, 1A resultado, 1D WF_SAMPLER_ID, 1E cor do relógio.
+- `GET_ALL_INFO` = `00` → `40 00 <atual> 01 <máx> 02 <qtd> 03 <n> {18 <k> params…} x n`.
+- `SET_CURRENT_BANDFACE` = `03 04 <id> 1D <sampler>` → resposta `43 04 <id> 1D <sampler>`.
+- `SET_CURRENT_ORDER` = `0A 19 <tipo> [qtd] {04 id 1D sampler}…`.
+- Foto de fundo e complicações: `ADD_IMAGE_LIST` / `SET_EDIT_INFO` + transferência de arquivo (`safiletransfer`). Em aberto.
+
+## Canal 0x0F = widgets
+- Ao conectar a pulseira manda `0F/00 01 <n> {03 <id> 02 <posição>} x n` (`ff` = fora do carrossel).
+
+## Canal 0x0A = saúde (HealthService)
+Cabeçalho de 1 byte: bit7 frameType, bit6 0 pedido / 1 resposta, bits 0–5 msgId. Inteiros little endian.
+
+| msgId | Mensagem |
+|---|---|
+| 2 | SYNC_DATA (pulseira manda `82`, confirmação `42`) |
+| 3 | REQUEST_DATA (pedido `03`, resposta `43`) |
+| 4 | WEARABLE_MSG |
+| 32/33 | capacidade |
+| 34 | GM_REQUEST_CAPABILITY (`A2`) |
+| 35 | resposta de GM capability noti |
+| 49/50/51 | pedir instalação / atualização / loja do Samsung Health |
+| 62 | ACK/NACK de dados grandes |
+| 63 | pedaço de dados grandes |
+
+- **`0A/A2` não é keep-alive**: é `GM_REQUEST_CAPABILITY` = `A2 02 E0 <seq 2B> E1 <versão 2B>` (versão 0x012D = 301).
+  A pulseira repete até receber a resposta certa:
+  `E2 <n> E0 <seq> E1 <min(versão, 301)> D0 02 D2 <versionCode do Samsung Health, 4B>` (n = parâmetros + 2).
+  Sem Samsung Health o plugin manda `D0 01` (n = parâmetros + 1) e a pulseira não sincroniza.
+  Depois o plugin manda `34` (pedido de capacidade de saúde).
+- **Confirmação do SYNC_DATA**: `42 02 E0 <seq> 04 02 01 01` (01 = SUCCESS; o plugin manda `… 01 09` quando não entende).
+- **Dados grandes**: `3F <flag> <nº do pedaço 4B> <corpo>`, flag bits 0–1 = 0 primeiro, 1 meio, 2 último
+  (`| 0x08 | janela<<2`). Junta os corpos e só no fim manda `3E 09 <qtd de pedaços 4B>` (NACK `3E 08 <nº>`).
+- **Corpo do SYNC_DATA**: `82 <n params>` e cada parâmetro começa com o tipo: E0 sequência (2B), 04 MSG_INFO e
+  05 DEVICE_INFO (tamanho 1B + bytes), 07 passos, 0A frequência, 10 sono, 11 estágios do sono, 13 estresse,
+  17 calorias, 70 SpO₂, 7E resumo do dia, 80 exercício, 89 sono combinado…
+  - Tipos antigos (07–1D): lista `[continua 0/1]{tag valor} x N campos`. Passos (07) = 12 campos:
+    01 início, 02 fim, 03 fuso, 05 atualização (4B, segundos), 10 passos, 11 distância (float), 12 velocidade,
+    13 calorias, 14 corrida, 15 caminhada, 16 duração (4B), 17 versão (1B), 75 uuid (16B).
+  - Tipos novos (≥ 0x70): `[continua 0/1][tamanho 4B][corpo]`. Resumo do dia (7E): 2C dia, 31 passos, 32 calorias,
+    33 distância, 34 meta (4B cada), 40/41/42 listas com tamanho.
 
 ## Em aberto
 - ~~Qual mensagem conclui a configuração~~ → **01/84 01** ✅
 - Reconexão com a chave salva: a pulseira derruba em 0,1 s. Por enquanto: despear + parear a cada conexão.
 - Depois de muitos ciclos de parear/despear, o scan do Windows chegou a travar (0 dispositivos) → reiniciar o Bluetooth.
 - Idioma: a pulseira ficou em espanhol (os frames de config vieram do Fit3 Bridge). Bridge manda 0B/20 e 0B/01 `04 0D 00` ("en-BR id 13").
-- O que o `0A/A2` periódico espera de resposta.
+- ~~O que o `0A/A2` periódico espera de resposta~~ → resposta `E2` de capacidade ✅ (testar no app v0.3).
 - Significado de `0x3A` (aparece em 01/43, 0B/42 e 1F) – bateria 58%?

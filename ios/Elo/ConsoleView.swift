@@ -209,29 +209,30 @@ struct ConsoleView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(L("Health probe")).font(EloFont.inter(15, .semibold)).foregroundColor(EloColor.text)
+                    Text(L("Health sync")).font(EloFont.inter(15, .semibold)).foregroundColor(EloColor.text)
                     Spacer()
-                    Text(L("Experimental"))
-                        .font(EloFont.inter(11, .semibold)).foregroundColor(EloColor.warn)
+                    Text(band.healthHandshake ? L("Linked") : L("Waiting"))
+                        .font(EloFont.inter(11, .semibold))
+                        .foregroundColor(band.healthHandshake ? EloColor.accent : EloColor.warn)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Capsule().fill(EloColor.warnBg))
+                        .background(Capsule().fill(band.healthHandshake ? EloColor.accent.opacity(0.12) : EloColor.warnBg))
                 }
-                Text(L("Sends %d candidate requests (round 2: 0x18 type-80 requests) to find steps, sleep and SpO₂. Takes about 2 minutes. Watch the band and note anything that shows up, then export the .jsonl.", Fit3Client.probeList().count))
+                Text(L("Elo answers the band's health handshake (channel 0x0A) the way the official plugin does, confirms each data sync and reads steps from it. Unknown parts stay in the capture for decoding."))
                     .font(EloFont.inter(12)).foregroundColor(EloColor.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack {
-                    Text(L("Auto-reply 0A/A2 keep-alive")).font(EloFont.inter(14, .medium)).foregroundColor(EloColor.text)
+                    Text(L("Answer health handshake")).font(EloFont.inter(14, .medium)).foregroundColor(EloColor.text)
                     Spacer()
-                    EloToggle(isOn: Binding(get: { band.autoAckA2 }, set: { band.autoAckA2 = $0 }))
+                    EloToggle(isOn: Binding(get: { band.healthSyncEnabled }, set: { band.healthSyncEnabled = $0 }))
                 }
-                if band.probeRunning {
-                    ProgressView(value: Double(band.probeIndex), total: Double(max(band.probeTotal, 1)))
-                        .tint(EloColor.accent)
-                    Button(L("Stop probe (%d/%d)", band.probeIndex, band.probeTotal)) { band.stopProbe() }
-                        .buttonStyle(EloButtonStyle(filled: false, height: 48, fontSize: 15))
-                } else {
-                    Button(L("Start probe")) { band.startProbe() }
-                        .buttonStyle(EloButtonStyle(height: 48, fontSize: 15))
-                        .disabled(!band.sessionReady)
+                Button(L("Request health data")) {
+                    if !band.recording { band.toggleRecording() }
+                    band.requestHealthData()
+                }
+                .buttonStyle(EloButtonStyle(height: 48, fontSize: 15))
+                .disabled(!band.sessionReady)
+                ForEach(Array(band.healthLog.prefix(8).enumerated()), id: \.offset) { item in
+                    Text(item.element).font(EloFont.mono(10)).foregroundColor(EloColor.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(14)

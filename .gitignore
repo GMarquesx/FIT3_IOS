@@ -19,3 +19,9 @@ ios/*.xcodeproj/
 ios/xcodebuild.log
 ios/Elo/Info.plist
 .DS_Store
+
+# APKs do app oficial (so para analise local, nunca no repo)
+APK'S/
+*.apk
+*.apks
+*.xapk

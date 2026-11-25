@@ -232,23 +232,39 @@ struct TodayView: View {
 
     // MARK: Passos
 
+    private var goal: Int { band.stepGoal ?? stepGoal }
+
+    private var stepsDetail: String {
+        guard band.stepsToday != nil else { return L("Not synced from the band yet") }
+        var parts: [String] = []
+        if let d = band.distanceToday, d > 0 {
+            parts.append(d >= 1000 ? String(format: "%.1f km", d / 1000) : String(format: "%.0f m", d))
+        }
+        parts.append(L("synced %@", EloFormat.relative(band.lastHealthSync)))
+        return parts.joined(separator: " · ")
+    }
+
     private var stepsCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let steps = band.stepsToday
+        let progress = min(1, Double(steps ?? 0) / Double(max(goal, 1)))
+        return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text("—").font(EloFont.grotesk(24)).foregroundColor(EloColor.text)
+                    Text(steps.map { EloFormat.number($0) } ?? "—").font(EloFont.grotesk(24)).foregroundColor(EloColor.text)
                     Text(L("steps")).font(EloFont.inter(13)).foregroundColor(EloColor.secondary)
                 }
                 Spacer()
-                Text(L("goal %@", EloFormat.number(stepGoal)))
+                Text(L("goal %@", EloFormat.number(goal)))
                     .font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
             }
-            ZStack(alignment: .leading) {
-                Capsule().fill(EloColor.border)
-                Capsule().fill(EloColor.accent).frame(width: 0)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(EloColor.border)
+                    Capsule().fill(EloColor.accent).frame(width: geo.size.width * progress)
+                }
             }
             .frame(height: 8)
-            Text(L("Not synced from the band yet"))
+            Text(stepsDetail)
                 .font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
         }
         .padding(.horizontal, 16)
@@ -264,7 +280,9 @@ struct TodayView: View {
             MetricCard(icon: Icons.moon, tint: Color(hex: 0xA78BFA), tintBg: Color(hex: 0x231C3A),
                        title: L("Sleep"), value: "—", unit: nil, detail: L("Waiting for sync"))
             MetricCard(icon: Icons.flame, tint: Color(hex: 0xFF8A3D), tintBg: Color(hex: 0x33200F),
-                       title: L("Calories"), value: "—", unit: nil, detail: L("Waiting for sync"))
+                       title: L("Calories"), value: band.caloriesToday.map { EloFormat.number(Int($0.rounded())) } ?? "—",
+                       unit: band.caloriesToday == nil ? nil : L("kcal"),
+                       detail: band.caloriesToday == nil ? L("Waiting for sync") : L("from steps today"))
             heartCard
             MetricCard(icon: Icons.oxygen, tint: Color(hex: 0x5AB8FF), tintBg: Color(hex: 0x132A3D),
                        title: L("Oxygen"), value: "—", unit: L("% SpO₂"), detail: L("Waiting for sync"))
