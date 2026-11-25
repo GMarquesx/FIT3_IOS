@@ -458,6 +458,14 @@ final class Fit3Client: NSObject, ObservableObject {
                 }
             }
             return L("Health handshake")
+        case (false, HealthProto.MsgId.requestData):
+            // A pulseira pede dados ao "Samsung Health" (perfil, metas); confirmamos para ela seguir.
+            if let seq = HealthProto.sequence(msg), healthSyncEnabled {
+                healthSeq = max(healthSeq, seq)
+                sendHealth(L("Request ACK"), HealthProto.requestDataAck(seq: seq))
+            }
+            healthNote("band request data \(msg.count) B")
+            return L("Band requests data")
         case (_, HealthProto.MsgId.syncData), (true, HealthProto.MsgId.requestData):
             let isRequestData = h.msgId == HealthProto.MsgId.requestData
             let result = HealthSyncParser.parse(msg, isRequestData: isRequestData)

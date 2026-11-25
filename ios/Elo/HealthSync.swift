@@ -167,7 +167,8 @@ enum HealthProto {
         add(0xA0, [0x01])
         add(0xC2, [0x02])
         add(0xA2, le32(sHealthVersion))
-        for tag: UInt8 in [0xA9, 0xAE, 0xAF, 0xB1] {
+        // B2 = manifesto de dados pedidos (tipo + intervalo); sem ele a pulseira pode mandar so alguns tipos.
+        for tag: UInt8 in [0xA9, 0xAE, 0xAF, 0xB1, 0xB2] {
             if let v = cap.blocks[tag] { add(tag, v) }
         }
         if let w = cap.wearableMessage { add(0xC3, w) }
@@ -181,6 +182,11 @@ enum HealthProto {
     /// Confirmacao do SYNC_DATA: 42 02 E0 seq 04 02 01 <resultado> (01 = SUCCESS, 09 = VALIDATION_ERROR).
     static func syncAck(seq: Int, ok: Bool) -> [UInt8] {
         [0x42, 0x02, 0xE0] + le16(seq) + [0x04, 0x02, 0x01, UInt8(ok ? 0x01 : 0x09)]
+    }
+
+    /// Resposta ao REQUEST_DATA que a pulseira manda (03 E0 seq 04 02 01 01 05 ...): 43 E0 seq 04 02 01 01.
+    static func requestDataAck(seq: Int) -> [UInt8] {
+        [0x43, 0xE0] + le16(seq) + [0x04, 0x02, 0x01, 0x01]
     }
 
     /// Pedido de dados (REQUEST_DATA), como o Samsung Health faz ao abrir: 03 E0 seq.
@@ -317,10 +323,12 @@ enum HealthSyncParser {
         typeNames[t] ?? String(format: "0x%02X", t)
     }
 
+    /// A pulseira conta segundos desde 01/01/1990 (read4BytesTimeLong soma 631152000000 ms).
+    static let bandEpochOffset: Double = 631_152_000
+
     static func date(_ secs: UInt32) -> Date? {
         guard secs != 0 else { return nil }
-        let s = Double(secs)
-        return Date(timeIntervalSince1970: s > 1e11 ? s / 1000 : s)
+        return Date(timeIntervalSince1970: Double(secs) + bandEpochOffset)
     }
 
     static func float(_ v: UInt32) -> Float { Float(bitPattern: v) }

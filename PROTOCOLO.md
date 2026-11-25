@@ -157,6 +157,14 @@ Cabeçalho de 1 byte: bit7 frameType, bit6 0 pedido / 1 resposta, bits 0–5 msg
   `E2 <n> E0 <seq> E1 <min(versão, 301)> D0 02 D2 <versionCode do Samsung Health, 4B>` (n = parâmetros + 2).
   Sem Samsung Health o plugin manda `D0 01` (n = parâmetros + 1) e a pulseira não sincroniza.
   Depois o plugin manda `34` (pedido de capacidade de saúde).
+- **Capacidade (0xA0, msgId 32)**: depois do A2 a pulseira manda a ficha dela (875 B em 2 fragmentos SAP) a cada 20 s.
+  Resposta aceita (25/11): `E0 <n> A1 <versão> C0 02 C1 00 A0 01 C2 02 A2 <S Health 4B>` + blocos A9/AE/AF/B1/C3 copiados.
+  Depois disso a pulseira passa a mandar SYNC_DATA.
+- **Fragmentos SAP**: payload `02 4x CH CH …` = primeiro pedaço, `06 4x …` = último (sem canal); juntar os corpos.
+- **Tempo**: segundos desde 01/01/1990 (somar 631152000 para Unix).
+- **SYNC_DATA real** (25/11): `82 03 E0 <seq> 0A <frequência: 2 registros por hora com binning por minuto> 05 <device info>`.
+  Cada `03 E0 seq` nosso faz a pulseira responder com um SYNC_DATA (só device info quando não há nada novo).
+- **REQUEST_DATA da pulseira**: `03 E0 seq 04 02 01 01 05 <device info>`; respondemos `43 E0 seq 04 02 01 01`.
 - **Confirmação do SYNC_DATA**: `42 02 E0 <seq> 04 02 01 01` (01 = SUCCESS; o plugin manda `… 01 09` quando não entende).
 - **Dados grandes**: `3F <flag> <nº do pedaço 4B> <corpo>`, flag bits 0–1 = 0 primeiro, 1 meio, 2 último
   (`| 0x08 | janela<<2`). Junta os corpos e só no fim manda `3E 09 <qtd de pedaços 4B>` (NACK `3E 08 <nº>`).

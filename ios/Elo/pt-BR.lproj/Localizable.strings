@@ -398,3 +398,5 @@
 "Part (last)" = "Parte (última)";
 "Part (%d B)" = "Parte (%d B)";
 "Health capability reply" = "Resposta de capacidade de saúde";
+"Request ACK" = "Confirmação do pedido";
+"Band requests data" = "Pulseira pede dados";
