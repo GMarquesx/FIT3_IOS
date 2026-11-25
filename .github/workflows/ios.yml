@@ -40,6 +40,9 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/Elo.app Payload/
+          # Assinatura ad-hoc so para embutir os entitlements (HealthKit); o iloader/SideStore reassina no iPhone.
+          codesign --force --sign - --timestamp=none --entitlements Elo/Elo.entitlements Payload/Elo.app
+          codesign -d --entitlements - Payload/Elo.app
           zip -qry Elo.ipa Payload
           ls -la Elo.ipa
 

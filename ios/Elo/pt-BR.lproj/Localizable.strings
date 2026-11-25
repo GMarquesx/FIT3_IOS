@@ -330,3 +330,19 @@
 "Restore default" = "Restaurar padrão";
 "Save to band" = "Gravar na pulseira";
 "Name this widget" = "Nome do widget";
+
+/* v0.3: Apple Health */
+"Steps and distance" = "Passos e distância";
+"coming soon" = "em breve";
+"waiting for the band" = "aguardando a pulseira";
+"%@ today" = "%@ hoje";
+"%@ kcal today" = "%@ kcal hoje";
+"%d readings in 24 h" = "%d leituras em 24 h";
+"live readings and band history" = "leituras ao vivo e histórico da pulseira";
+"last %d%%" = "última %d%%";
+"Apple Health isn't available on this device." = "O app Saúde não está disponível neste aparelho.";
+"Allow Elo to write steps, heart rate, oxygen and energy to the Health app." = "Permita que o Elo grave passos, batimentos, oxigênio e energia no app Saúde.";
+"If nothing appears, open Health → your profile → Apps → Elo and turn the categories on." = "Se nada aparecer, abra Saúde → seu perfil → Apps → Elo e ative as categorias.";
+"Connect to Apple Health" = "Conectar ao app Saúde";
+"Last write failed: %@" = "A última gravação falhou: %@";
+"Writing %d of 5 types · %d samples saved" = "Gravando %d de 5 tipos · %d amostras salvas";

@@ -3,6 +3,7 @@ import SwiftUI
 /// Tela "Apple Health" (Saude.dc.html).
 struct HealthView: View {
     @ObservedObject private var band = Fit3Client.shared
+    @ObservedObject private var hk = HealthWriter.shared
     @AppStorage("hk.steps") private var steps = true
     @AppStorage("hk.sleep") private var sleep = true
     @AppStorage("hk.energy") private var energy = true
@@ -19,24 +20,17 @@ struct HealthView: View {
                     .font(EloFont.inter(14)).foregroundColor(EloColor.secondary).lineSpacing(3)
             }
 
-            HStack(spacing: 10) {
-                EloIcon(paths: Icons.info, size: 20, lineWidth: 2, color: EloColor.warn)
-                Text(L("Writing to Health starts once the band's history is decoded."))
-                    .font(EloFont.inter(13)).foregroundColor(EloColor.text)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
-            .card(radius: 14, fill: Color(hex: 0x1A1710), stroke: Color(hex: 0x4A3A1C))
+            statusCard
 
             VStack(alignment: .leading, spacing: 0) {
                 SectionTitle(text: L("Write to Health"))
                     .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
-                row(L("Steps"), L("— today"), "stepCount", $steps)
-                row(L("Sleep"), L("deep, REM and light stages"), "sleepAnalysis", $sleep)
-                row(L("Active energy"), L("— kcal today"), "activeEnergyBurned", $energy)
-                row(L("Heart rate"), L("%d live samples today", band.bpmSamples.count), "heartRate", $heart)
-                row(L("Oxygen saturation"), L("nightly readings"), "oxygenSaturation", $spo2, last: true)
+                row(L("Steps and distance"), stepsDetail, "stepCount", $steps)
+                row(L("Active energy"), energyDetail, "activeEnergyBurned", $energy)
+                row(L("Heart rate"), heartDetail, "heartRate", $heart)
+                row(L("Oxygen saturation"), spo2Detail, "oxygenSaturation", $spo2)
+                row(L("Sleep"), L("coming soon"), "sleepAnalysis", $sleep, last: true)
+                    .opacity(0.5).disabled(true)
             }
             .card()
 
@@ -63,6 +57,65 @@ struct HealthView: View {
             Button(L("Sync now")) { band.sync() }
                 .buttonStyle(EloButtonStyle())
         }
+    }
+
+    private var stepsDetail: String {
+        guard let v = band.stepsToday else { return L("waiting for the band") }
+        return L("%@ today", EloFormat.number(v))
+    }
+
+    private var energyDetail: String {
+        guard let v = band.activeKcalToday else { return L("waiting for the band") }
+        return L("%@ kcal today", EloFormat.number(Int(v.rounded())))
+    }
+
+    private var heartDetail: String {
+        let n = band.heartHistory.count
+        return n > 0 ? L("%d readings in 24 h", n) : L("live readings and band history")
+    }
+
+    private var spo2Detail: String {
+        guard let v = band.lastSpO2 else { return L("waiting for the band") }
+        return L("last %d%%", v)
+    }
+
+    @ViewBuilder private var statusCard: some View {
+        if !hk.available {
+            banner(L("Apple Health isn't available on this device."), warn: true)
+        } else if !hk.requested || hk.allowedCount == 0 {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(L("Allow Elo to write steps, heart rate, oxygen and energy to the Health app."))
+                    .font(EloFont.inter(14)).foregroundColor(EloColor.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                if hk.requested {
+                    Text(L("If nothing appears, open Health → your profile → Apps → Elo and turn the categories on."))
+                        .font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button(L("Connect to Apple Health")) { hk.requestAccess() }
+                    .buttonStyle(EloButtonStyle(height: 46, fontSize: 15))
+            }
+            .padding(14)
+            .card(radius: 14)
+        } else if let err = hk.lastError {
+            banner(L("Last write failed: %@", err), warn: true)
+        } else {
+            banner(L("Writing %d of 5 types · %d samples saved", hk.allowedCount, hk.savedCount)
+                   + (hk.lastWrite.map { " · " + EloFormat.relative($0) } ?? ""), warn: false)
+        }
+    }
+
+    private func banner(_ text: String, warn: Bool) -> some View {
+        HStack(spacing: 10) {
+            EloIcon(paths: Icons.info, size: 20, lineWidth: 2, color: warn ? EloColor.warn : EloColor.accent)
+            Text(text).font(EloFont.inter(13)).foregroundColor(EloColor.text)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .card(radius: 14, fill: warn ? Color(hex: 0x1A1710) : Color(hex: 0x0F1B18),
+              stroke: warn ? Color(hex: 0x4A3A1C) : Color(hex: 0x1E3D35))
     }
 
     private func row(_ title: String, _ detail: String, _ code: String, _ value: Binding<Bool>,

@@ -41,6 +41,13 @@ targets:
         NSBluetoothAlwaysUsageDescription: "Elo uses Bluetooth to talk to your Galaxy Fit3."
         NSLocationWhenInUseUsageDescription: "Elo uses GPS to measure the distance and pace of your runs."
         NSLocationAlwaysAndWhenInUseUsageDescription: "Elo keeps recording your run while the screen is off."
+        NSHealthUpdateUsageDescription: "Elo saves the steps, heart rate, blood oxygen and energy measured by your Galaxy Fit3 to the Health app."
+        NSHealthShareUsageDescription: "Elo reads Health data only to avoid saving the same sample twice."
+    entitlements:
+      path: Elo/Elo.entitlements
+      properties:
+        com.apple.developer.healthkit: true
+        com.apple.developer.healthkit.access: []
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.gmarquesx.elo

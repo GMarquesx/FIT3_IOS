@@ -79,6 +79,7 @@ final class Fit3Client: NSObject, ObservableObject {
     @Published var distanceToday: Double?
     @Published var lastHealthSync: Date?
     @Published var lastSpO2: Int?
+    @Published var activeKcalToday: Double?
     @Published var lastSpO2Date: Date?
     @Published var heartHistory: [HeartSample] = []
     @Published var healthHandshake = false
@@ -110,6 +111,8 @@ final class Fit3Client: NSObject, ObservableObject {
     private var notificationCounter = Int(Date().timeIntervalSince1970) % 100000
     private var rssiTimer: Timer?
     private var rxBuffer: [UInt8] = []
+    private var liveHR: [Int] = []
+    private var liveHRStart: Date?
     private var rxBufferDate = Date.distantPast
     private var largeData = LargeDataAssembler()
     private var healthSeq = 0
@@ -247,7 +250,16 @@ final class Fit3Client: NSObject, ObservableObject {
         }
     }
 
+    /// Media da medicao ao vivo (ou de cada minuto, numa corrida) vai para o app Saude.
+    private func flushLiveHeart() {
+        defer { liveHR = []; liveHRStart = nil }
+        guard let start = liveHRStart, liveHR.count >= 3 else { return }
+        let avg = Int((Double(liveHR.reduce(0, +)) / Double(liveHR.count)).rounded())
+        HealthWriter.shared.writeHeart([(start: start, end: Date(), bpm: avg)], tag: "hrlive")
+    }
+
     private func stopHeartRate() {
+        flushLiveHeart()
         guard hrHolds == 0 else { return }
         if let hr = hrMeas, let p = peripheral, p.state == .connected {
             p.setNotifyValue(false, for: hr)
@@ -492,7 +504,7 @@ final class Fit3Client: NSObject, ObservableObject {
         if let day = r.days.last(where: { $0.day.map { cal.isDateInToday($0) } ?? false }) ?? (r.days.count == 1 ? r.days.first : nil) {
             if let v = day.steps { stepsToday = v; changed = true }
             if let v = day.goal, v > 0 { stepGoal = v }
-            if let v = day.calories { caloriesToday = Double(v) }
+            if let v = day.calories { caloriesToday = Double(v); activeKcalToday = Double(v) }
             if let v = day.distance { distanceToday = Double(v) }
         } else {
             let today = r.steps.filter { $0.start.map { cal.isDateInToday($0) } ?? false }
@@ -517,6 +529,7 @@ final class Fit3Client: NSObject, ObservableObject {
         if r.days.isEmpty, let c = r.calories.last(where: { $0.day.map { cal.isDateInToday($0) } ?? false }) {
             let total = Double((c.active ?? 0) + (c.rest ?? 0))
             if total > 0 { caloriesToday = total; changed = true }
+            if let a = c.active, a > 0 { activeKcalToday = Double(a) }
         }
         if !r.heart.isEmpty {
             var all = heartHistory + r.heart
@@ -541,6 +554,10 @@ final class Fit3Client: NSObject, ObservableObject {
         if !r.steps.isEmpty || !r.days.isEmpty || changed {
             lastHealthSync = Date()
             saveTodayActivity()
+            let hk = HealthWriter.shared
+            hk.writeDayTotals(steps: stepsToday, distanceMeters: distanceToday, activeKcal: activeKcalToday)
+            hk.writeHeart(r.heart.map { (start: $0.time, end: $0.time, bpm: $0.bpm) })
+            hk.writeSpO2(r.spo2)
         }
     }
 
@@ -568,6 +585,7 @@ final class Fit3Client: NSObject, ObservableObject {
         if let v = stepGoal { d["goal"] = Double(v) }
         if let v = caloriesToday { d["kcal"] = v }
         if let v = distanceToday { d["dist"] = v }
+        if let v = activeKcalToday { d["active"] = v }
         if let v = lastHealthSync { d["sync"] = v.timeIntervalSince1970 }
         UserDefaults.standard.set(d, forKey: key)
         if let v = lastSpO2, let t = lastSpO2Date {
@@ -585,6 +603,7 @@ final class Fit3Client: NSObject, ObservableObject {
         stepGoal = d["goal"].map { Int($0) } ?? stepGoal
         caloriesToday = d["kcal"]
         distanceToday = d["dist"]
+        activeKcalToday = d["active"]
         lastHealthSync = d["sync"].map { Date(timeIntervalSince1970: $0) }
         if let o = UserDefaults.standard.dictionary(forKey: "lastSpO2") as? [String: Double],
            let v = o["value"], let t = o["time"] {
@@ -1010,6 +1029,9 @@ extension Fit3Client: CBPeripheralDelegate {
                     lastBpm = hr.bpm
                     lastBpmDate = Date()
                     bpmSamples.append(hr.bpm)
+                    if liveHRStart == nil { liveHRStart = Date() }
+                    liveHR.append(hr.bpm)
+                    if let st = liveHRStart, Date().timeIntervalSince(st) >= 60 { flushLiveHeart() }
                     if bpmSamples.count > 120 { bpmSamples.removeFirst(bpmSamples.count - 120) }
                     restingBpm = min(restingBpm ?? hr.bpm, hr.bpm)
                 }
