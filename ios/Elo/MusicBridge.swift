@@ -93,7 +93,8 @@ final class MusicBridge: NSObject, ObservableObject {
         case 1:
             let wanted = param(msg, 1) ?? 1
             bandListening = wanted != 0
-            out(L("Music: updates"), [0x40 | 23, 0x01, 0x01, UInt8(wanted == 0 ? 0 : 1)])
+            let flag: UInt8 = wanted == 0 ? 0 : 1
+            out(L("Music: updates"), [0x57, 0x01, 0x01, flag])
             if bandListening {
                 startObserving()
                 refresh(push: false)
@@ -116,7 +117,11 @@ final class MusicBridge: NSObject, ObservableObject {
             press(key: key, action: action)
             return L("Music: button %@", keyName(key) + (action == 2 ? " ↓" : " ↑"))
         case 5:
-            out(L("Music: capability"), [0x40 | 20, 0x02, 0x01] + le32(MusicBridge.maxVolume) + [0x02] + le32(10))
+            var m: [UInt8] = [0x54, 0x02, 0x01]
+            m += le32(MusicBridge.maxVolume)
+            m.append(0x02)
+            m += le32(10)
+            out(L("Music: capability"), m)
             return L("Music: capability request")
         case 6:
             sendVolume()
@@ -129,12 +134,20 @@ final class MusicBridge: NSObject, ObservableObject {
         case 8:
             let appId = Array(MusicBridge.appId.utf8)
             let title = Array(MusicBridge.appTitle.utf8)
-            out(L("Music: app info"), [0x80 | 0x40 | 22, 0x03, 0x01, UInt8(appId.count)] + appId
-                + [0x02, UInt8(title.count)] + title + [0x03, 0x00])
+            var m: [UInt8] = [0xD6, 0x03, 0x01, UInt8(appId.count)]
+            m += appId
+            m += [0x02, UInt8(title.count)]
+            m += title
+            m += [0x03, 0x00]
+            out(L("Music: app info"), m)
             return L("Music: app info request")
         case 9:
             let appId = Array(MusicBridge.appId.utf8)
-            out(L("Music: queue"), [0x80 | 0x40 | 32, 0x03, 0x01, UInt8(appId.count)] + appId + [0x02, 0x00, 0x03] + le32(0))
+            var m: [UInt8] = [0xE0, 0x03, 0x01, UInt8(appId.count)]
+            m += appId
+            m += [0x02, 0x00, 0x03]
+            m += le32(0)
+            out(L("Music: queue"), m)
             return L("Music: queue request")
         default:
             return String(format: "09/%02X", first)
@@ -182,22 +195,32 @@ final class MusicBridge: NSObject, ObservableObject {
     private func sendMetadata() {
         let item = player.nowPlayingItem
         let durationMs = Int64(((item?.playbackDuration ?? 0) * 1000).rounded())
-        out(L("Music: now playing"),
-            [0x80 | 0x40 | 17, 0x05, 0x01] + le64(durationMs)
-            + text(0x02, title) + text(0x03, artist) + text(0x04, "") + text(0x05, MusicBridge.appId))
+        var m: [UInt8] = [0xD1, 0x05, 0x01]
+        m += le64(durationMs)
+        m += text(0x02, title)
+        m += text(0x03, artist)
+        m += text(0x04, "")
+        m += text(0x05, MusicBridge.appId)
+        out(L("Music: now playing"), m)
     }
 
     private func sendState() {
         let positionMs = Int64((player.currentPlaybackTime.isFinite ? player.currentPlaybackTime : 0) * 1000)
         let state: UInt8 = player.playbackState == .playing ? 3 : 2
-        out(L("Music: state"),
-            [0x80 | 0x40 | 18, 0x04, 0x01, state, 0x02] + le64(positionMs) + [0x04] + le64(0)
-            + text(0x03, MusicBridge.appId))
+        var m: [UInt8] = [0xD2, 0x04, 0x01, state, 0x02]
+        m += le64(positionMs)
+        m.append(0x04)
+        m += le64(0)
+        m += text(0x03, MusicBridge.appId)
+        out(L("Music: state"), m)
     }
 
     private func sendVolume() {
         let vol = Int32((AVAudioSession.sharedInstance().outputVolume * Float(MusicBridge.maxVolume)).rounded())
-        out(L("Music: volume"), [0x40 | 21, 0x02, 0x01] + le32(vol) + [0x02, 0x01])
+        var m: [UInt8] = [0x55, 0x02, 0x01]
+        m += le32(vol)
+        m += [0x02, 0x01]
+        out(L("Music: volume"), m)
     }
 
     private func out(_ label: String, _ msg: [UInt8]) {
@@ -221,7 +244,9 @@ final class MusicBridge: NSObject, ObservableObject {
         var str = String(s.prefix(99))
         while str.utf8.count > 255 { str.removeLast() }
         let b = Array(str.utf8)
-        return [id, UInt8(b.count)] + b
+        var r: [UInt8] = [id, UInt8(b.count)]
+        r += b
+        return r
     }
 
     private func le32(_ v: Int32) -> [UInt8] {
