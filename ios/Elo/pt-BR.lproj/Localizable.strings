@@ -371,3 +371,6 @@
 "Band music screen connected" = "Tela de música da pulseira conectada";
 "Open the music widget on the band" = "Abra o widget de música na pulseira";
 "Works with the Music app (Apple Music). iOS doesn't let other apps control Spotify or YouTube Music." = "Funciona com o app Música (Apple Music). O iOS não deixa outros apps controlarem Spotify ou YouTube Music.";
+"The permission request was refused." = "O pedido de permissão foi recusado.";
+"The installed copy of Elo was signed without HealthKit permission, so iOS won't show the request. The signer (iloader/SideStore) removed it." = "A cópia instalada do Elo foi assinada sem a permissão do HealthKit, então o iOS não mostra o pedido. O assinador (iloader/SideStore) removeu.";
+"Error: %@" = "Erro: %@";

@@ -18,6 +18,14 @@ final class HealthWriter: ObservableObject {
 
     var available: Bool { HKHealthStore.isHealthDataAvailable() }
 
+    /// O perfil de assinatura (embedded.mobileprovision) traz o HealthKit? nil = sem perfil para ler.
+    /// Se o assinador (iloader/SideStore) tirar o entitlement, o iOS nem mostra o pedido de permissao.
+    lazy var profileHasHealthKit: Bool? = {
+        guard let url = Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision"),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return data.range(of: Data("com.apple.developer.healthkit".utf8)) != nil
+    }()
+
     /// Interruptor geral (tela Apple Health).
     var enabled: Bool {
         get { UserDefaults.standard.object(forKey: "hk.enabled") as? Bool ?? true }
@@ -48,7 +56,12 @@ final class HealthWriter: ObservableObject {
             DispatchQueue.main.async {
                 UserDefaults.standard.set(true, forKey: "hk.requested")
                 self?.requested = true
-                if let error = error { self?.lastError = error.localizedDescription }
+                if let error = error {
+                    self?.lastError = error.localizedDescription
+                    Fit3Client.shared.log("health kit: \(error.localizedDescription)")
+                } else if !ok {
+                    self?.lastError = L("The permission request was refused.")
+                }
                 done?(ok)
             }
         }

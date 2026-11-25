@@ -87,7 +87,16 @@ struct HealthView: View {
                 Text(L("Allow Elo to write steps, heart rate, oxygen and energy to the Health app."))
                     .font(EloFont.inter(14)).foregroundColor(EloColor.text)
                     .fixedSize(horizontal: false, vertical: true)
-                if hk.requested {
+                if hk.profileHasHealthKit == false {
+                    Text(L("The installed copy of Elo was signed without HealthKit permission, so iOS won't show the request. The signer (iloader/SideStore) removed it."))
+                        .font(EloFont.inter(12)).foregroundColor(EloColor.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let err = hk.lastError {
+                    Text(L("Error: %@", err))
+                        .font(EloFont.mono(11)).foregroundColor(EloColor.warn)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if hk.requested {
                     Text(L("If nothing appears, open Health → your profile → Apps → Elo and turn the categories on."))
                         .font(EloFont.inter(12)).foregroundColor(EloColor.secondary)
                         .fixedSize(horizontal: false, vertical: true)

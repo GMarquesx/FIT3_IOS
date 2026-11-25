@@ -864,7 +864,7 @@ final class Fit3Client: NSObject, ObservableObject {
         if recording { capture.append(frame) }
     }
 
-    private func log(_ text: String) {
+    func log(_ text: String) {
         lines.append("\(clock.string(from: Date()))  \(text)")
         if lines.count > 400 {
             lines.removeFirst(lines.count - 400)
