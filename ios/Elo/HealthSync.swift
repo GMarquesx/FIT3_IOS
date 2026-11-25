@@ -93,7 +93,7 @@ enum HealthProto {
 
     /// Confirmacao do SYNC_DATA: 42 02 E0 seq 04 02 01 <resultado> (01 = SUCCESS, 09 = VALIDATION_ERROR).
     static func syncAck(seq: Int, ok: Bool) -> [UInt8] {
-        [0x42, 0x02, 0xE0] + le16(seq) + [0x04, 0x02, 0x01, ok ? 0x01 : 0x09]
+        [0x42, 0x02, 0xE0] + le16(seq) + [0x04, 0x02, 0x01, UInt8(ok ? 0x01 : 0x09)]
     }
 
     /// Pedido de dados (REQUEST_DATA), como o Samsung Health faz ao abrir: 03 E0 seq.
@@ -103,7 +103,7 @@ enum HealthProto {
 
     /// ACK/NACK de dados grandes: 3E (08|flag) <chunk 4 bytes>.
     static func largeAck(chunks: Int, ok: Bool) -> [UInt8] {
-        [0x3E, 0x08 | (ok ? 0x01 : 0x00)] + le32(UInt32(chunks))
+        [0x3E, UInt8(ok ? 0x09 : 0x08)] + le32(UInt32(chunks))
     }
 }
 
